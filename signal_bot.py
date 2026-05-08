@@ -21,10 +21,8 @@ from config import (
     SCHEDULE_HOUR, SCHEDULE_MINUTE, TIMEZONE, MISFIRE_GRACE_SEC,
 )
 from logging_config import setup_logging
-from universe import get_full_universe, UniverseLoadError
-from screener import screen_universe
-from signals import filter_signals
-from telegram_sender import send_signals, send_error_alert
+from telegram_sender import send_error_alert
+from v2_engine import run_v2_scan
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -38,28 +36,17 @@ def run_scan() -> None:
     logger.info("=" * 50)
 
     try:
-        tickers = get_full_universe()
-    except UniverseLoadError as e:
-        logger.error(f"[Bot] Universe load failed: {e}", exc_info=True)
-        send_error_alert(f"Universe load failed: {e}")
-        return
-    except Exception as e:
-        logger.error(f"[Bot] Unexpected universe error: {e}", exc_info=True)
-        send_error_alert(f"Unexpected universe error: {type(e).__name__}: {e}")
-        return
-
-    try:
-        logger.info(f"[Bot] Screening {len(tickers)} tickers...")
-        screener_results = screen_universe(tickers)
-        signals = filter_signals(screener_results)
-        send_signals(signals)
+        result = run_v2_scan(debug="--debug-v2" in sys.argv)
     except Exception as e:
         logger.error(f"[Bot] Scan pipeline error: {e}", exc_info=True)
         send_error_alert(f"Scan pipeline error: {type(e).__name__}: {e}")
         return
 
     elapsed = (datetime.now() - start).total_seconds()
-    logger.info(f"[Bot] Scan complete in {elapsed:.1f}s — {len(signals)} signals sent")
+    logger.info(
+        f"[Bot] V2 scan complete in {elapsed:.1f}s — "
+        f"{result.get('messages_sent', 0)} messages sent"
+    )
 
 
 def main() -> None:

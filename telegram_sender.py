@@ -17,6 +17,11 @@ import requests
 from dotenv import load_dotenv
 
 from formatter import format_signal_message, format_summary_message
+from message_formatter import (
+    format_market_summary,
+    format_trade_signal_message,
+    format_watchlist_summary,
+)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -126,3 +131,46 @@ def send_signals(signals: list[dict]) -> int:
 
     logger.info(f"[Telegram] Delivered {sent}/{len(signals) + 1} messages")
     return sent
+
+
+def send_v2_market_summary(market_regime: dict, stats: dict | None = None) -> int:
+    """Send only the V2 market-regime summary."""
+    try:
+        ok = send_message(format_market_summary(market_regime, stats))
+        logger.info(f"[Telegram] V2 market summary delivered={ok}")
+        return 1 if ok else 0
+    except Exception as e:
+        logger.error(f"[Telegram] V2 market summary failed: {e}", exc_info=True)
+        return 0
+
+
+def send_v2_report(
+    market_regime: dict,
+    trade_signals: list[dict],
+    watchlist: list[dict],
+    stats: dict,
+) -> int:
+    """Send the V2 scan summary, A+/A trade alerts, and B watchlist summary."""
+    try:
+        sent = 0
+        if send_message(format_market_summary(market_regime, stats)):
+            sent += 1
+
+        for signal in trade_signals:
+            if send_message(format_trade_signal_message(signal)):
+                sent += 1
+            else:
+                logger.warning(
+                    f"[Telegram] Failed to send V2 signal for {signal.get('ticker')}"
+                )
+
+        if watchlist:
+            if send_message(format_watchlist_summary(watchlist, market_regime)):
+                sent += 1
+
+        expected = 1 + len(trade_signals) + (1 if watchlist else 0)
+        logger.info(f"[Telegram] V2 delivered {sent}/{expected} messages")
+        return sent
+    except Exception as e:
+        logger.error(f"[Telegram] V2 report failed: {e}", exc_info=True)
+        return 0

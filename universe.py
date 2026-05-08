@@ -29,6 +29,21 @@ _WIKI_HEADERS = {
 }
 
 
+def dedupe_tickers(*ticker_lists: list[str]) -> list[str]:
+    """Normalize, dedupe, and sort ticker lists for Yahoo Finance symbols."""
+    try:
+        deduped: set[str] = set()
+        for ticker_list in ticker_lists:
+            for ticker in ticker_list:
+                normalized = str(ticker).strip().replace(".", "-")
+                if normalized:
+                    deduped.add(normalized)
+        return sorted(deduped)
+    except Exception as e:
+        logger.error(f"[Universe] Ticker dedupe failed: {e}", exc_info=True)
+        return []
+
+
 def _fetch_wiki_tables(url: str) -> list[pd.DataFrame]:
     resp = requests.get(url, headers=_WIKI_HEADERS, timeout=15)
     resp.raise_for_status()
@@ -108,6 +123,20 @@ def get_full_universe() -> list[str]:
     sp500 = get_sp500_tickers()
     ndx100 = get_nasdaq100_tickers()
     rut2000 = get_russell2000_tickers()
-    combined = sorted(set(sp500 + ndx100 + rut2000))
+    combined = dedupe_tickers(sp500, ndx100, rut2000)
     logger.info(f"[Universe] Full universe: {len(combined)} unique tickers")
     return combined
+
+
+def get_v2_universe() -> list[str]:
+    """Load the V2 production universe: S&P 500 plus Nasdaq 100, deduped."""
+    try:
+        sp500 = get_sp500_tickers()
+        ndx100 = get_nasdaq100_tickers()
+        combined = dedupe_tickers(sp500, ndx100)
+        logger.info(f"[Universe] V2 universe: {len(combined)} unique tickers")
+        return combined
+    except UniverseLoadError:
+        raise
+    except Exception as e:
+        raise UniverseLoadError(f"V2 universe load failed: {type(e).__name__}: {e}") from e

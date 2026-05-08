@@ -29,6 +29,67 @@ DATA_PERIOD = "18mo"        # yfinance lookback; enough history for stable EMA20
 DATA_INTERVAL = "1d"
 MIN_DATA_ROWS = 250
 
+# === V2 Trade Qualification Engine ===
+V2_MARKET_SYMBOLS = ("SPY", "QQQ")
+V2_SETUP_TYPE = "VCP Breakout"
+
+# Liquidity
+V2_MIN_PRICE = 10.0
+V2_MIN_AVG_VOLUME = 1_000_000
+V2_MIN_AVG_DOLLAR_VOLUME = 20_000_000
+V2_MIN_MARKET_CAP = 2_000_000_000
+
+# Indicator windows
+ATR_PERIOD = 14
+ATR_SMA_WINDOW = 20
+RELATIVE_STRENGTH_LOOKBACK = 20
+HIGH_52W_LOOKBACK = 252
+VCP_PIVOT_LOOKBACK = 20
+VCP_CONTRACTION_LOOKBACK_SHORT = 5
+VCP_CONTRACTION_LOOKBACK_MID = 10
+VCP_CONTRACTION_LOOKBACK_LONG = 20
+
+# Setup thresholds
+VCP_MAX_52W_HIGH_DISTANCE = 0.05
+VCP_RANGE_TIGHTENING_RATIO = 0.85
+VCP_ATR_CONTRACTION_RATIO = 0.90
+VCP_VOLUME_DRY_UP_RATIO = 0.80
+VCP_BREAKOUT_VOLUME_RATIO = 1.00
+VCP_NEAR_BREAKOUT_THRESHOLD = 0.015
+
+# Scoring / grading
+V2_SCORE_A_PLUS_MIN = 85
+V2_SCORE_A_MIN = 75
+V2_SCORE_B_MIN = 65
+V2_SCORE_C_MIN = 50
+V2_SCORE_WEIGHTS = {
+    "market_regime": 10,
+    "liquidity": 10,
+    "trend_structure": 15,
+    "relative_strength": 15,
+    "high_52w_proximity": 10,
+    "consolidation_tightness": 10,
+    "atr_contraction": 10,
+    "volume_quality": 10,
+    "risk_reward": 10,
+}
+V2_MAX_TRADE_SIGNALS = 20
+V2_MAX_WATCHLIST = 10
+
+# Risk framework
+V2_RISK_PER_TRADE = 0.01
+V2_MAX_OPEN_POSITIONS = 5
+V2_MAX_TOTAL_PORTFOLIO_RISK = 0.05
+V2_MAX_NEW_POSITIONS_PER_DAY = 2
+V2_MAX_SAME_SECTOR_POSITIONS = 2
+V2_PYRAMID_MIN_R = 1.5
+V2_ADD_ON_MAX_SIZE_PCT = 0.50
+V2_TARGET_1_R = 2.5
+V2_TARGET_2_R = 4.0
+V2_STOP_BUFFER_PCT = 0.005
+V2_BUY_STOP_BUFFER_PCT = 0.001
+V2_HOLDING_STYLE = "Swing: 3 trading days to 8 weeks; trail with 10EMA/20EMA"
+
 # === Universe Sanity Thresholds ===
 # Fix #2 — refuse to proceed when a core source returns a crippled list.
 EXPECTED_MIN_SP500 = 450
@@ -57,3 +118,11 @@ assert MAX_SIGNALS > 0, "MAX_SIGNALS must be positive"
 assert MIN_DATA_ROWS >= EMA_LONG, "MIN_DATA_ROWS must cover EMA_LONG"
 assert RSI_PULLBACK_MIN < RSI_PULLBACK_MAX, "invalid RSI pullback band"
 assert 0 <= SCHEDULE_HOUR < 24 and 0 <= SCHEDULE_MINUTE < 60, "invalid schedule time"
+assert V2_MIN_PRICE > 0, "V2_MIN_PRICE must be positive"
+assert V2_MIN_AVG_VOLUME > 0, "V2_MIN_AVG_VOLUME must be positive"
+assert V2_MIN_AVG_DOLLAR_VOLUME > 0, "V2_MIN_AVG_DOLLAR_VOLUME must be positive"
+assert V2_MIN_MARKET_CAP > 0, "V2_MIN_MARKET_CAP must be positive"
+assert sum(V2_SCORE_WEIGHTS.values()) == 100, "V2 score weights must total 100"
+assert V2_SCORE_A_PLUS_MIN > V2_SCORE_A_MIN > V2_SCORE_B_MIN > V2_SCORE_C_MIN
+assert 0 < V2_STOP_BUFFER_PCT < 1, "V2_STOP_BUFFER_PCT must be in (0, 1)"
+assert V2_TARGET_2_R > V2_TARGET_1_R > 0, "invalid V2 target multiples"

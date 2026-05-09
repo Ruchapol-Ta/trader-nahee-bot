@@ -48,6 +48,9 @@ def format_market_summary(market_regime: dict, stats: dict | None = None) -> str
 def format_trade_signal_message(signal: dict) -> str:
     """Format one concise A+/A V2 trade setup alert."""
     try:
+        if _valid_v3_decision(signal.get("v3_decision")):
+            return _format_v3_trade_signal_message(signal)
+
         plan = signal["trade_plan"]
         reasons = signal.get("pass_reasons", [])[:4]
         reason_lines = [f"• {reason}" for reason in reasons] or ["• No reason supplied"]
@@ -70,9 +73,6 @@ def format_trade_signal_message(signal: dict) -> str:
             f"Holding: {plan.get('holding_style', 'Swing: 3 trading days to 8 weeks')}",
             f"Timestamp: {_timestamp()}",
         ]
-        v3_lines = _format_v3_section(signal)
-        if v3_lines:
-            lines.extend(["", *v3_lines])
         return "\n".join(lines)
     except Exception as e:
         logger.error(f"[FormatterV2] Trade signal failed: {e}", exc_info=True)
@@ -102,6 +102,24 @@ def _telegram_markdown_text(value: object) -> str:
     return text
 
 
+def _display_decision(value: object) -> str:
+    """Return trader-facing decision labels before Markdown escaping."""
+    text = str(value)
+    if text == "WATCHLIST_ONLY":
+        return "WATCHLIST ONLY"
+    return _telegram_markdown_text(text)
+
+
+def _v2_reason_lines(signal: dict) -> list[str]:
+    """Return non-empty V2 reason bullets for V3 display."""
+    reasons = []
+    for reason in signal.get("pass_reasons", [])[:4]:
+        text = str(reason).strip() if reason is not None else ""
+        if text:
+            reasons.append(f"• {_telegram_markdown_text(text)}")
+    return reasons
+
+
 def _format_v3_section(signal: dict) -> list[str]:
     """Format optional V3 decision guidance without changing plain V2 output."""
     decision = signal.get("v3_decision")
@@ -110,8 +128,7 @@ def _format_v3_section(signal: dict) -> list[str]:
 
     position = signal.get("v3_position_size") or {}
     lines = [
-        "V3 Decision:",
-        f"Decision: {_telegram_markdown_text(decision.get('decision'))}",
+        f"Trade decision: {_display_decision(decision.get('decision'))}",
         f"Confidence: {_telegram_markdown_text(decision.get('confidence'))}",
     ]
     if position:
@@ -124,12 +141,56 @@ def _format_v3_section(signal: dict) -> list[str]:
         else:
             reason = _telegram_markdown_text(position.get("reason", "invalid inputs"))
             lines.append(f"Position size: unavailable ({reason})")
-    lines.append(f"Why: {_telegram_markdown_text(decision.get('main_reason'))}")
+    lines.append(f"Main reason: {_telegram_markdown_text(decision.get('main_reason'))}")
     warnings = decision.get("risk_warnings") or []
     if warnings:
-        lines.append("Watch out: " + "; ".join(_telegram_markdown_text(item) for item in warnings[:3]))
-    lines.append(f"Next action: {_telegram_markdown_text(decision.get('next_action'))}")
+        lines.append("Risk warnings: " + "; ".join(_telegram_markdown_text(item) for item in warnings[:3]))
+    lines.append(f"What to do next: {_telegram_markdown_text(decision.get('next_action'))}")
     return lines
+
+
+def _format_v3_trade_signal_message(signal: dict) -> str:
+    """Format a V3-first trade decision alert while preserving V2 source context."""
+    plan = signal["trade_plan"]
+    reason_lines = _v2_reason_lines(signal)
+    decision = signal["v3_decision"]
+
+    lines = [
+        f"📈 {signal['ticker']} - {signal.get('setup_type', 'VCP Breakout')}",
+        *_format_v3_section(signal),
+        "",
+        f"🏛 Market: {signal.get('market_regime', 'Unknown')}",
+        f"🏅 {signal['grade']} | Score {signal['score']}",
+        f"Price: ${float(signal['close']):.2f}",
+        "",
+    ]
+
+    if decision.get("decision") == "AVOID":
+        lines.append("V2 setup levels, not an entry recommendation.")
+
+    lines.extend([
+        f"🟢 Entry: ${float(plan['entry']):.2f} | Buy stop: ${float(plan['buy_stop']):.2f}",
+        f"🔴 Stop: ${float(plan['stop_loss']):.2f}",
+        f"⚖️ R:R: {float(plan['expected_rr']):.1f}R",
+        (
+            f"🎯 Upside scenario 1: ${float(plan['target_1']):.2f} | "
+            f"Upside scenario 2: ${float(plan['target_2']):.2f}"
+        ),
+        f"Position size: {plan.get('position_size', 'Portfolio size required')}",
+    ])
+
+    if reason_lines:
+        lines.extend(["", "Why V2 liked it:", *reason_lines])
+
+    invalid_condition = signal.get("invalid_condition")
+    if invalid_condition and str(invalid_condition).strip().lower() != "none":
+        lines.extend(["", f"⚠️ Invalid: {_telegram_markdown_text(invalid_condition)}"])
+
+    lines.extend([
+        f"Holding: {plan.get('holding_style', 'Swing: 3 trading days to 8 weeks')}",
+        f"Timestamp: {_timestamp()}",
+    ])
+    return "\n".join(lines)
 
 
 def format_watchlist_summary(watchlist: list[dict], market_regime: dict) -> str:

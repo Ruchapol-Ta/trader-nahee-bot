@@ -1,14 +1,21 @@
 # v2_engine.py - V2 Trade Qualification Engine orchestration.
+import copy
 import logging
 from collections import Counter
+from uuid import uuid4
 
 from config import (
+    ENABLE_POSITION_SIZING,
+    ENABLE_SIGNAL_JOURNAL,
+    ENABLE_V3_DECISION_LAYER,
     V2_MARKET_SYMBOLS,
     V2_MAX_NEW_POSITIONS_PER_DAY,
     V2_MAX_TRADE_SIGNALS,
     V2_MAX_WATCHLIST,
     V2_SETUP_TYPE,
 )
+from decision_engine import evaluate_signal_decision
+from journal import journal_signals
 from liquidity_filter import (
     enrich_with_market_metadata,
     evaluate_liquidity,
@@ -21,6 +28,7 @@ from screener import batch_download, compute_series, latest_snapshot, screen_uni
 from setup_vcp import evaluate_vcp_setup
 from telegram_sender import send_v2_market_summary, send_v2_report
 from universe import get_v2_universe
+from position_sizing import calculate_signal_position_size
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +263,31 @@ def _benchmark_returns(market_regime: dict) -> tuple[float, float]:
         return 0.0, 0.0
 
 
+def _annotate_v3_outputs(
+    trade_signals: list[dict],
+    watchlist: list[dict],
+    market_regime: dict,
+) -> tuple[list[dict], list[dict]]:
+    """Add optional Pre-V3 annotations without changing V2 selection."""
+    if not ENABLE_V3_DECISION_LAYER and not ENABLE_POSITION_SIZING:
+        return trade_signals, watchlist
+
+    annotated_trade_signals = [copy.deepcopy(signal) for signal in trade_signals]
+    annotated_watchlist = [copy.deepcopy(signal) for signal in watchlist]
+    for signal in [*annotated_trade_signals, *annotated_watchlist]:
+        if ENABLE_V3_DECISION_LAYER:
+            decision = evaluate_signal_decision(
+                signal,
+                market_regime=market_regime,
+                enabled=True,
+            )
+            if decision is not None:
+                signal["v3_decision"] = decision
+        if ENABLE_POSITION_SIZING:
+            signal["v3_position_size"] = calculate_signal_position_size(signal)
+    return annotated_trade_signals, annotated_watchlist
+
+
 def qualify_snapshot(
     data: dict,
     market_regime: dict,
@@ -405,6 +438,7 @@ def run_v2_scan(debug: bool = False) -> dict:
             item for item in qualified
             if item["grade"] == "B"
         ][:V2_MAX_WATCHLIST]
+        trade_signals, watchlist = _annotate_v3_outputs(trade_signals, watchlist, market_regime)
 
         grades = Counter(item["grade"] for item in qualified)
         diagnostics["funnel"]["A_plus_count"] = grades.get("A+", 0)
@@ -445,6 +479,10 @@ def run_v2_scan(debug: bool = False) -> dict:
             f"setups={setup_passed} grades={dict(grades)}"
         )
         _log_diagnostics(diagnostics, debug)
+        if ENABLE_SIGNAL_JOURNAL:
+            run_id = str(uuid4())
+            written = journal_signals(trade_signals, watchlist, run_id=run_id)
+            logger.info(f"[V3] Journaled {written} selected signals run_id={run_id}")
         sent = send_v2_report(market_regime, trade_signals, watchlist, stats)
         return {
             "market_regime_valid": True,

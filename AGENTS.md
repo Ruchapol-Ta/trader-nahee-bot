@@ -1,87 +1,199 @@
 # PROJECT: Signal Bot 🤖
 
-## Overview
-EOD Telegram bot that screens S&P 500, Nasdaq 100, and Russell 2000 stocks
-for EMA + RSI signals and sends full-detail alerts after US market close.
+## Current Status
+Signal Bot is now a Python 3.10+ EOD Telegram trading signal bot with V2 already implemented, committed, and pushed.
 
-## Architecture
-- **Data source:** yfinance (free, no API key needed)
-- **Universe:** S&P 500 + Nasdaq 100 + Russell 2000 (~1,800 tickers, deduped)
-- **Signal logic:** EMA 9/21 crossover + RSI filter
-- **Scheduler:** APScheduler (runs at 4:30 AM BKK time = ~30min after NYSE close)
-- **Output:** Telegram Bot API → personal chat or group
+V2 is no longer the original EMA 9/21 + RSI-only bot. Do not use the old V1 assumptions as the source of truth.
 
-## Signal Logic (Option B — Balanced)
-### Bullish Signal ✅
-- EMA 9 crosses ABOVE EMA 21 (today vs yesterday)
-- RSI 14 is between 40–70 (momentum building, not overbought)
+## Current V2 Overview
+The bot screens US equities and sends Telegram alerts after US market close.
 
-### Bearish Signal 🔴
-- EMA 9 crosses BELOW EMA 21
-- RSI 14 is between 30–60 (momentum fading, not oversold)
+Current V2 focus:
+- Market-regime-aware signal pipeline
+- VCP / breakout / near-breakout setup detection
+- Liquidity filtering
+- Relative strength filtering
+- Scoring and grading
+- Risk engine for entry, stop, buy stop, targets, and R:R
+- A+/A breakout alerts
+- B watchlist summaries
+- C/rejected signals excluded from Telegram
+- Diagnostic funnel and reject aggregation
 
-## Telegram Message Format
-```
-📊 [TICKER] — BULLISH SIGNAL
+## Runtime
+Main scheduled bot:
 
-💰 Price:     $XXX.XX  (+X.XX%)
-📈 EMA 9:     $XXX.XX
-📉 EMA 21:    $XXX.XX
-⚡ RSI 14:    XX.X
-📦 Volume:    X.XXM  (vs avg X.XXM)
-
-🎯 Entry:     $XXX.XX  (current close)
-🟢 TP:        $XXX.XX  (+5%)
-🔴 SL:        $XXX.XX  (-3%)
-
-🏷️ S&P 500 | Sector: Technology
-🕐 Signal at: 2025-04-23 16:30 ET
+```bash
+python signal_bot.py
 ```
 
-## Module Structure
-```
-signal_bot/
-├── AGENTS.md           ← this file
-├── signal_bot.py       ← main entry point + scheduler
-├── screener.py         ← fetch data + compute indicators
-├── signals.py          ← signal logic (EMA crossover + RSI filter)
-├── formatter.py        ← format Telegram message
-├── telegram_sender.py  ← send via Telegram Bot API
-├── universe.py         ← load ticker lists
-└── config.py           ← constants (EMA periods, RSI thresholds, TP/SL %)
+One-off run:
+
+```bash
+python signal_bot.py --run-now
 ```
 
-## Config Values (editable)
-- EMA_SHORT = 9
-- EMA_LONG = 21
-- RSI_PERIOD = 14
-- RSI_BULL_MIN = 40, RSI_BULL_MAX = 70
-- RSI_BEAR_MIN = 30, RSI_BEAR_MAX = 60
-- TP_PCT = 0.05   (5%)
-- SL_PCT = 0.03   (3%)
-- MAX_SIGNALS = 20  (cap per run to avoid spam)
-- SCHEDULE_TIME = "04:30"  (BKK time, Asia/Bangkok)
+One-off V2 debug run:
 
-## Environment Variables (.env)
-```
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
+```bash
+python signal_bot.py --run-now --debug-v2
 ```
 
-## Current State
-- ✅ AGENTS.md written
-- ✅ signal_bot.py scaffold created
-- 🔄 screener.py — fetch + EMA/RSI compute
-- ❌ signals.py — crossover detection
-- ❌ formatter.py — message template
-- ❌ telegram_sender.py — API call
-- ❌ universe.py — ticker lists
-- ❌ scheduler wired up
+Validation:
 
-## Coding Rules
+```bash
+python -m pytest tests -v
+python -m compileall .
+```
+
+## Current Known Stack
 - Python 3.10+
-- Use pandas for all data manipulation
-- Use yfinance for price data (period="60d", interval="1d")
-- No hardcoded credentials — always use os.environ or .env
-- Every function must have: docstring + try/except + meaningful error log
-- Log to console with format: [TIMESTAMP] [LEVEL] message
+- yfinance
+- pandas
+- requests
+- APScheduler
+- pytz
+- python-dotenv
+- lxml
+- pytest
+
+No pyproject.toml, Poetry, Pipenv, Docker, CI, lint, type checker, or pre-commit tooling is currently assumed.
+
+## Core Modules
+Current core modules may include:
+
+```text
+signal_bot.py          # scheduler and --run-now orchestration
+v2_engine.py           # V2 pipeline orchestration
+universe.py            # S&P 500, Nasdaq 100, Russell sample, dedupe
+screener.py            # yfinance batch download, indicators, snapshots
+market_regime.py       # SPY/QQQ market regime hard gate
+liquidity_filter.py    # price, volume, dollar volume, optional market cap
+relative_strength.py   # 20-day outperformance vs SPY/QQQ
+setup_vcp.py           # VCP / breakout / near-breakout checks
+scoring.py             # score and grade
+risk_engine.py         # entry, buy stop, stop, R targets
+message_formatter.py   # V2 Telegram formatting
+telegram_sender.py     # Telegram Bot API send path
+config.py              # thresholds and constants
+logging_config.py      # console + rotating log configuration
+```
+
+V1 modules may still exist and should not be deleted unless explicitly requested:
+```text
+signals.py
+formatter.py
+recent_cross_scan.py
+smoke_test.py
+```
+
+## V3 Goal
+V3 should upgrade the bot from a Signal Alert Bot into a Trade Decision Assistant.
+
+V3 must answer three questions for each relevant signal:
+
+1. Should I enter?
+2. If yes, how much should I risk?
+3. If no, what exactly should I wait for?
+
+## Required V3 Decision Outcomes
+V3 decision layer must classify signals into:
+
+- `ENTER`
+- `WAIT`
+- `WATCHLIST_ONLY`
+- `AVOID`
+
+Decision output should include:
+- decision
+- confidence
+- main_reason
+- supporting_reasons
+- risk_warnings
+- next_action
+
+## Pre-V3 Foundation Requirements
+Before implementing full V3, complete these foundation steps:
+
+1. Update project docs so they reflect V2/V3, not old V1 assumptions.
+2. Add V3 config flags.
+3. Add journal/signal storage.
+4. Add tests for storage and current V2 compatibility.
+5. Add decision engine skeleton.
+6. Add position sizing with mock portfolio config.
+7. Update Telegram formatter for V3 fields without breaking V2 formatting.
+8. Run:
+   ```bash
+   python -m pytest tests -v
+   python -m compileall .
+   ```
+
+## Implementation Rules
+- Do not break V2 behavior.
+- Do not rewrite V2 scoring/filtering unless explicitly required.
+- V3 should read V2 signal outputs and add decision interpretation on top.
+- Keep V3 behind config flags where possible.
+- Prefer simple modules and explicit tests.
+- Start with JSONL journaling unless SQLite is clearly already supported or trivial.
+- Use mock/config portfolio sizing first; do not implement real account/position tracking yet.
+- Do not add backtest, dashboard, AI coach, or strategy optimization in Pre-V3.
+- Do not introduce heavy dependencies.
+- Preserve Telegram sending behavior.
+- Keep live Telegram sends limited during testing.
+- Use pytest and compileall before commit.
+
+## Suggested V3 Config Flags
+Add to `config.py` or the existing config location:
+
+```python
+ENABLE_V3_DECISION_LAYER = False
+ENABLE_SIGNAL_JOURNAL = True
+ENABLE_POSITION_SIZING = False
+ENABLE_V3_TELEGRAM_FORMAT = False
+
+JOURNAL_PATH = "data/signal_journal.jsonl"
+
+MOCK_PORTFOLIO_SIZE = 10000.0
+DEFAULT_RISK_PER_TRADE_PCT = 0.01
+
+RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_NORMAL_PCT = 0.01
+RISK_MODE_AGGRESSIVE_PCT = 0.02
+```
+
+## Suggested Pre-V3 Modules
+Add only if they do not already exist:
+
+```text
+journal.py             # JSONL signal/run storage
+decision_engine.py     # ENTER/WAIT/WATCHLIST_ONLY/AVOID skeleton
+position_sizing.py     # mock portfolio sizing calculation
+```
+
+## Testing Expectations
+Add or update tests for:
+
+```text
+tests/test_journal.py
+tests/test_decision_engine.py
+tests/test_position_sizing.py
+tests/test_v3_formatter_compatibility.py
+tests/test_v2_backward_compatibility.py
+```
+
+## Commit Discipline
+Before commit:
+
+```bash
+python -m pytest tests -v
+python -m compileall .
+git status
+```
+
+Recommended commit message:
+
+```bash
+feat: add pre-v3 trade decision foundation
+```
+
+Do not push unless explicitly requested.

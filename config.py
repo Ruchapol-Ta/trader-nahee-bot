@@ -90,6 +90,21 @@ V2_STOP_BUFFER_PCT = 0.005
 V2_BUY_STOP_BUFFER_PCT = 0.001
 V2_HOLDING_STYLE = "Swing: 3 trading days to 8 weeks; trail with 10EMA/20EMA"
 
+# === Pre-V3 Foundation ===
+ENABLE_V3_DECISION_LAYER = False
+ENABLE_SIGNAL_JOURNAL = True
+ENABLE_POSITION_SIZING = False
+ENABLE_V3_TELEGRAM_FORMAT = False
+
+JOURNAL_PATH = "data/signal_journal.jsonl"
+
+MOCK_PORTFOLIO_SIZE = 10000.0
+DEFAULT_RISK_PER_TRADE_PCT = 0.01
+
+RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_NORMAL_PCT = 0.01
+RISK_MODE_AGGRESSIVE_PCT = 0.02
+
 # === Universe Sanity Thresholds ===
 # Fix #2 — refuse to proceed when a core source returns a crippled list.
 EXPECTED_MIN_SP500 = 450

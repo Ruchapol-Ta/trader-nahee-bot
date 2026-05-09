@@ -70,10 +70,66 @@ def format_trade_signal_message(signal: dict) -> str:
             f"Holding: {plan.get('holding_style', 'Swing: 3 trading days to 8 weeks')}",
             f"Timestamp: {_timestamp()}",
         ]
+        v3_lines = _format_v3_section(signal)
+        if v3_lines:
+            lines.extend(["", *v3_lines])
         return "\n".join(lines)
     except Exception as e:
         logger.error(f"[FormatterV2] Trade signal failed: {e}", exc_info=True)
         return f"Signal Bot V2\nFormatter error: {type(e).__name__}"
+
+
+def _valid_v3_decision(decision: object) -> bool:
+    """Return True when a V3 decision has the required display fields."""
+    if not isinstance(decision, dict):
+        return False
+    required = {
+        "decision",
+        "confidence",
+        "main_reason",
+        "supporting_reasons",
+        "risk_warnings",
+        "next_action",
+    }
+    return required.issubset(decision)
+
+
+def _telegram_markdown_text(value: object) -> str:
+    """Escape dynamic text for Telegram's legacy Markdown parse mode."""
+    text = str(value)
+    for char in ["\\", "_", "*", "[", "`"]:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
+def _format_v3_section(signal: dict) -> list[str]:
+    """Format optional V3 decision guidance without changing plain V2 output."""
+    decision = signal.get("v3_decision")
+    if not _valid_v3_decision(decision):
+        return []
+
+    position = signal.get("v3_position_size") or {}
+    lines = [
+        "V3 Decision:",
+        f"Decision: {_telegram_markdown_text(decision.get('decision'))}",
+        f"Confidence: {_telegram_markdown_text(decision.get('confidence'))}",
+    ]
+    if position:
+        lines.append(f"Risk mode: {_telegram_markdown_text(position.get('risk_mode', 'normal'))}")
+        if position.get("valid"):
+            lines.append(
+                f"Position size: {position.get('suggested_shares')} shares | "
+                f"Max loss: ${float(position.get('max_loss', 0.0)):.2f}"
+            )
+        else:
+            reason = _telegram_markdown_text(position.get("reason", "invalid inputs"))
+            lines.append(f"Position size: unavailable ({reason})")
+    lines.append(f"Why: {_telegram_markdown_text(decision.get('main_reason'))}")
+    warnings = decision.get("risk_warnings") or []
+    if warnings:
+        lines.append("Watch out: " + "; ".join(_telegram_markdown_text(item) for item in warnings[:3]))
+    lines.append(f"Next action: {_telegram_markdown_text(decision.get('next_action'))}")
+    return lines
 
 
 def format_watchlist_summary(watchlist: list[dict], market_regime: dict) -> str:

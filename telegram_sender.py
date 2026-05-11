@@ -30,10 +30,28 @@ _TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
 def _get_credentials() -> tuple[str | None, str | None]:
-    return (
-        os.environ.get("TELEGRAM_BOT_TOKEN"),
-        os.environ.get("TELEGRAM_CHAT_ID"),
-    )
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    target_mode = (os.environ.get("TELEGRAM_TARGET_MODE") or "").strip().lower()
+
+    if target_mode == "test":
+        return token, os.environ.get("TELEGRAM_TEST_CHAT_ID")
+    if target_mode == "prod":
+        return token, os.environ.get("TELEGRAM_PROD_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
+    if target_mode:
+        return token, None
+
+    return token, os.environ.get("TELEGRAM_CHAT_ID")
+
+
+def _missing_credentials_message() -> str:
+    target_mode = (os.environ.get("TELEGRAM_TARGET_MODE") or "").strip().lower()
+    if target_mode == "test":
+        return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_TEST_CHAT_ID for test target mode"
+    if target_mode == "prod":
+        return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_PROD_CHAT_ID/TELEGRAM_CHAT_ID for prod target mode"
+    if target_mode:
+        return "[Telegram] TELEGRAM_TARGET_MODE must be 'test' or 'prod'"
+    return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env"
 
 
 def _redact(text: str, token: str | None) -> str:
@@ -55,7 +73,7 @@ def send_message(
     """
     token, chat_id = _get_credentials()
     if not token or not chat_id:
-        logger.error("[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env")
+        logger.error(_missing_credentials_message())
         return False
 
     url = f"{_TELEGRAM_API_BASE}/bot{token}/sendMessage"

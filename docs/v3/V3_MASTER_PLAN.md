@@ -20,6 +20,17 @@ V2 signal pipeline
 → V3 Telegram formatting
 ```
 
+## Decision-Quality Mindset
+V3 should improve decision quality, not just add more labels.
+
+Rules:
+- Separate setup quality from trade readiness.
+- Treat missing risk data as non-actionable until proven otherwise.
+- Prefer `WAIT` or `WATCHLIST_ONLY` over weak `ENTER` calls.
+- Every non-`ENTER` decision must explain what to wait for or why to avoid.
+- Confidence should describe evidence quality, not excitement about the chart.
+- Formatter text should communicate decisions, not create them.
+
 ## Step-by-Step Order
 
 ### Step 1 — Update Docs
@@ -135,8 +146,12 @@ Handle:
 - zero/negative portfolio
 - zero/negative risk percent
 
-### Step 7 — Update Telegram Formatter
-Add V3 fields only if enabled or decision data exists.
+### Step 7 — Add V3 Formatter Support, Not V3 Output
+Add formatter capability for V3 fields behind flags.
+
+V3 Telegram output must stay disabled until shadow mode review passes.
+
+The formatter must not create decision logic. It should only display fields already produced by `decision_engine.py`.
 
 V3 format should show:
 ```text

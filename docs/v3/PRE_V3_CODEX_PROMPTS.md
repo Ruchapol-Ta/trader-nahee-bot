@@ -217,3 +217,82 @@ Before pushing:
 
 Then push to the current remote branch.
 ```
+
+## Prompt 7 — Architecture Review
+
+```text
+Review the V3 foundation architecture before implementation or after the first implementation pass.
+
+Focus on:
+- module boundaries
+- formatter bloat
+- duplicated logic
+- decision logic leakage
+- config sprawl
+- test gaps
+
+Use docs/v3/prompts/codex/architecture_review.md as the review prompt.
+
+Return:
+- critical issues
+- recommended changes
+- files likely to change
+- test gaps
+- readiness score from 1-10
+
+Do not change code yet.
+```
+
+## Prompt 8 — Formatter Review
+
+```text
+Review the Telegram formatter changes for V3 compatibility.
+
+Rules:
+- V2 Telegram output must remain unchanged when V3 data is absent or disabled.
+- Formatter must stay display-only.
+- Decision logic belongs in decision_engine.py, not message_formatter.py.
+- V3 fields should be concise and scannable.
+
+Check:
+- backward compatibility tests
+- message length risk
+- missing-field behavior
+- risk warning readability
+- next_action visibility
+
+Return:
+- pass/fail
+- formatter risks
+- required fixes
+- suggested tests
+
+Do not change code yet.
+```
+
+## Prompt 9 — Shadow Mode Review
+
+```text
+Review V3 shadow-mode readiness.
+
+Context:
+- V3 should run silently beside V2 before Telegram output changes.
+- V2 sends must remain unchanged.
+- V3 decisions should be journaled for manual review.
+
+Check:
+- V3 errors cannot block V2 Telegram sends by default
+- journal records include enough data to audit decisions
+- V2 A+/A vs V3 decision mismatches are reviewable
+- V2 B vs V3 decision mismatches are reviewable
+- ENTER decisions require valid entry and stop
+- non-ENTER decisions include useful next_action text
+
+Return:
+- shadow-mode readiness
+- blocking issues
+- recommended log fields
+- enablement criteria for V3 Telegram output
+
+Do not change code yet.
+```

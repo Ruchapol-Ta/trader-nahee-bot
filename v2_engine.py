@@ -15,7 +15,7 @@ from config import (
     V2_SETUP_TYPE,
 )
 from decision_engine import evaluate_signal_decision
-from journal import journal_signals
+from journal import build_run_summary_record, journal_run_summary, journal_signals
 from liquidity_filter import (
     enrich_with_market_metadata,
     evaluate_liquidity,
@@ -276,16 +276,40 @@ def _annotate_v3_outputs(
     annotated_watchlist = [copy.deepcopy(signal) for signal in watchlist]
     for signal in [*annotated_trade_signals, *annotated_watchlist]:
         if ENABLE_V3_DECISION_LAYER:
-            decision = evaluate_signal_decision(
-                signal,
-                market_regime=market_regime,
-                enabled=True,
-            )
-            if decision is not None:
-                signal["v3_decision"] = decision
+            try:
+                decision = evaluate_signal_decision(
+                    signal,
+                    market_regime=market_regime,
+                    enabled=True,
+                )
+                if decision is not None:
+                    signal["v3_decision"] = decision
+            except Exception as e:
+                signal["v3_error"] = type(e).__name__
+                logger.error(f"[V3] Decision annotation failed for {signal.get('ticker')}: {e}", exc_info=True)
         if ENABLE_POSITION_SIZING:
             signal["v3_position_size"] = calculate_signal_position_size(signal)
     return annotated_trade_signals, annotated_watchlist
+
+
+def _log_v3_shadow_summary(trade_signals: list[dict], watchlist: list[dict]) -> None:
+    """Log decision counts for shadow review without affecting V2 output."""
+    decisions = Counter(
+        item.get("v3_decision", {}).get("decision")
+        for item in [*trade_signals, *watchlist]
+        if isinstance(item.get("v3_decision"), dict)
+    )
+    error_count = sum(1 for item in [*trade_signals, *watchlist] if item.get("v3_error"))
+    logger.info(
+        "[V3] Shadow summary "
+        f"v2_trade_alerts={len(trade_signals)} "
+        f"v2_watchlist={len(watchlist)} "
+        f"enter={decisions.get('ENTER', 0)} "
+        f"wait={decisions.get('WAIT', 0)} "
+        f"watchlist_only={decisions.get('WATCHLIST_ONLY', 0)} "
+        f"avoid={decisions.get('AVOID', 0)} "
+        f"errors={error_count}"
+    )
 
 
 def qualify_snapshot(
@@ -483,6 +507,17 @@ def run_v2_scan(debug: bool = False) -> dict:
             run_id = str(uuid4())
             written = journal_signals(trade_signals, watchlist, run_id=run_id)
             logger.info(f"[V3] Journaled {written} selected signals run_id={run_id}")
+            summary = build_run_summary_record(
+                run_id=run_id,
+                trade_signals=trade_signals,
+                watchlist=watchlist,
+                market_regime=market_regime,
+                stats=stats,
+            )
+            if journal_run_summary(summary):
+                logger.info(f"[V3] Journaled run summary run_id={run_id}")
+        if ENABLE_V3_DECISION_LAYER:
+            _log_v3_shadow_summary(trade_signals, watchlist)
         sent = send_v2_report(market_regime, trade_signals, watchlist, stats)
         return {
             "market_regime_valid": True,

@@ -94,6 +94,101 @@ def test_trade_plan_uses_breakout_close_stop_below_contraction_low_and_r_targets
     assert plan["position_size"] == "Portfolio size required"
 
 
+def test_trade_plan_adds_structural_stop_metadata_without_changing_v2_stop():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=94.0,
+        pivot_low=92.0,
+    ))
+
+    assert plan["stop_loss"] == 91.54
+    assert plan["risk_per_share"] == 8.46
+    assert plan["structural_stop"] == plan["stop_loss"]
+    assert plan["structural_stop_source"] == "pivot_low"
+    assert plan["structural_stop_distance_pct"] == 0.0846
+
+
+def test_trade_plan_tactical_stop_prefers_valid_contraction_low():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=94.0,
+        pivot_low=80.0,
+        swing_low_5=96.0,
+        atr=3.0,
+    ))
+
+    assert plan["stop_loss"] == 79.6
+    assert plan["tactical_stop"] == 93.53
+    assert plan["tactical_stop_source"] == "contraction_low"
+    assert plan["tactical_stop_distance_pct"] == 0.0647
+    assert plan["tactical_stop_candidates"]["contraction_low"]["valid"] is True
+
+
+def test_trade_plan_tactical_stop_rejects_stop_at_or_above_entry():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=101.0,
+        pivot_low=80.0,
+        swing_low_5=102.0,
+        atr=3.0,
+    ))
+
+    assert plan["tactical_stop_source"] == "atr"
+    assert plan["tactical_stop_candidates"]["contraction_low"]["valid"] is False
+    assert "below entry" in plan["tactical_stop_candidates"]["contraction_low"]["reason"]
+    assert plan["tactical_stop_candidates"]["recent_5d_low"]["valid"] is False
+
+
+def test_trade_plan_tactical_stop_rejects_unrealistically_tight_stop():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=99.0,
+        pivot_low=80.0,
+        swing_low_5=98.5,
+        atr=1.0,
+    ))
+
+    assert plan["tactical_stop"] is None
+    assert plan["tactical_stop_source"] is None
+    assert "too close" in plan["tactical_stop_candidates"]["contraction_low"]["reason"]
+    assert "too close" in plan["tactical_stop_candidates"]["recent_5d_low"]["reason"]
+    assert "too close" in plan["tactical_stop_candidates"]["atr"]["reason"]
+
+
+def test_trade_plan_tactical_stop_uses_atr_when_low_candidates_invalid():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=99.0,
+        pivot_low=80.0,
+        swing_low_5=98.5,
+        atr=3.0,
+    ))
+
+    assert plan["tactical_stop"] == 95.5
+    assert plan["tactical_stop_source"] == "atr"
+    assert plan["tactical_stop_distance_pct"] == 0.045
+
+
+def test_trade_plan_leaves_tactical_stop_empty_when_no_candidate_is_valid():
+    plan = build_trade_plan(_setup_row(
+        close=100.0,
+        high=101.0,
+        contraction_low=99.0,
+        pivot_low=98.0,
+        swing_low_5=99.5,
+        atr=1.0,
+    ))
+
+    assert plan["tactical_stop"] is None
+    assert plan["tactical_stop_source"] is None
+    assert plan["tactical_stop_distance_pct"] is None
+
+
 def test_trade_plan_rejects_non_positive_risk():
     result = build_trade_plan(_setup_row(close=94.0, contraction_low=95.0, pivot_low=95.0))
 

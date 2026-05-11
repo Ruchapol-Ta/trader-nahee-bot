@@ -102,6 +102,8 @@ MOCK_PORTFOLIO_SIZE = 10000.0
 DEFAULT_RISK_PER_TRADE_PCT = 0.01
 
 RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_TINY_PCT = 0.0025
+RISK_MODE_SMALL_PCT = 0.005
 RISK_MODE_NORMAL_PCT = 0.01
 RISK_MODE_AGGRESSIVE_PCT = 0.02
 
@@ -111,8 +113,22 @@ V3_WATCHLIST_MIN_SCORE = V2_SCORE_B_MIN
 V3_ENTER_MIN_RR = V2_TARGET_1_R
 V3_WATCHLIST_MIN_RR = 2.0
 
+V3_RISK_PROFILE = "conservative"
+V3_RISK_PROFILES = {
+    "conservative": {
+        "enter_max_stop_pct": 0.08,
+    },
+    "balanced": {
+        "enter_max_stop_pct": 0.10,
+    },
+    "aggressive": {
+        "enter_max_stop_pct": 0.12,
+    },
+}
 V3_ENTER_MAX_STOP_DISTANCE_PCT = 0.08
 V3_AVOID_MAX_STOP_DISTANCE_PCT = 0.12
+V3_MIN_TACTICAL_STOP_DISTANCE_PCT = 0.025
+V3_ATR_STOP_MULTIPLE = 1.5
 
 V3_ENTER_MAX_EXTENSION_FROM_EMA20_PCT = 0.08
 V3_ENTER_MAX_EXTENSION_FROM_EMA50_PCT = 0.20
@@ -157,3 +173,10 @@ assert sum(V2_SCORE_WEIGHTS.values()) == 100, "V2 score weights must total 100"
 assert V2_SCORE_A_PLUS_MIN > V2_SCORE_A_MIN > V2_SCORE_B_MIN > V2_SCORE_C_MIN
 assert 0 < V2_STOP_BUFFER_PCT < 1, "V2_STOP_BUFFER_PCT must be in (0, 1)"
 assert V2_TARGET_2_R > V2_TARGET_1_R > 0, "invalid V2 target multiples"
+assert 0 < V3_MIN_TACTICAL_STOP_DISTANCE_PCT < 1, "V3_MIN_TACTICAL_STOP_DISTANCE_PCT must be in (0, 1)"
+assert V3_ATR_STOP_MULTIPLE > 0, "V3_ATR_STOP_MULTIPLE must be positive"
+assert V3_RISK_PROFILE in V3_RISK_PROFILES, "V3_RISK_PROFILE must be a supported profile"
+assert V3_RISK_PROFILES["conservative"]["enter_max_stop_pct"] == V3_ENTER_MAX_STOP_DISTANCE_PCT
+assert all(
+    0 < profile["enter_max_stop_pct"] < 1 for profile in V3_RISK_PROFILES.values()
+), "V3 risk profile stop thresholds must be in (0, 1)"

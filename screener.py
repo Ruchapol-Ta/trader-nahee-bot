@@ -131,6 +131,12 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             return None
         avg_volume = float(volume.iloc[-VOLUME_WINDOW:].mean())
         dollar_volume = close * volume
+        latest_index = close.index[-1]
+        latest_bar_date = (
+            latest_index.date().isoformat()
+            if hasattr(latest_index, "date")
+            else str(latest_index)
+        )
         pivot_window = high.iloc[-VCP_PIVOT_LOOKBACK - 1:-1]
         pivot_low_window = low.iloc[-VCP_PIVOT_LOOKBACK - 1:-1]
         if pivot_window.empty:
@@ -139,6 +145,7 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             pivot_low_window = low.iloc[-VCP_PIVOT_LOOKBACK:]
         return {
             "ticker": ticker,
+            "latest_bar_date": latest_bar_date,
             "open": float(series["open"].iloc[-1]),
             "high": float(high.iloc[-1]),
             "low": float(low.iloc[-1]),

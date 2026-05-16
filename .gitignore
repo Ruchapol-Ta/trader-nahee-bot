@@ -4,11 +4,13 @@
 
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.egg-info/
 .cache/
 .pytest_cache/
 .venv/
+.venv-laptop/
 venv/
 env/
 

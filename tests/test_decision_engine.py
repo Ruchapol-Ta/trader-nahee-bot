@@ -124,7 +124,7 @@ def test_actual_a_breakout_with_valid_risk_returns_enter():
     assert result["action_label"] != "Consider entry"
     assert result["confidence"] == "HIGH"
     assert result["trade_risk_mode"] != "NO_TRADE"
-    assert result["next_action"] == "Enter only if the planned buy stop triggers and the defined stop remains valid."
+    assert result["next_action"] == "Enter only if the planned buy stop triggers and the trading stop remains valid."
     assert "Consider entry" not in result["next_action"]
     assert result["decision_stop_source"] == "structural"
 

@@ -387,8 +387,13 @@ def _format_v3_trade_signal_message(signal: dict) -> str:
 def format_watchlist_summary(watchlist: list[dict], market_regime: dict) -> str:
     """Format B-grade setups as a compact watchlist summary."""
     try:
+        title = (
+            "📋 Signal Bot V3 Preview - B Watchlist"
+            if ENABLE_V3_TELEGRAM_FORMAT
+            else "📋 Signal Bot V2 - B Watchlist"
+        )
         lines = [
-            "📋 Signal Bot V2 - B Watchlist",
+            title,
             f"🏛 Market: {market_regime.get('summary', 'Unknown')}",
         ]
         if not watchlist:

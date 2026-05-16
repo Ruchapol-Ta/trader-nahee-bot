@@ -3,7 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from message_formatter import format_market_summary, format_trade_signal_message
+from message_formatter import (
+    format_market_summary,
+    format_trade_signal_message,
+    format_watchlist_summary,
+)
 
 
 def _full_v3_decision(**overrides):
@@ -611,17 +615,18 @@ def test_v3_watchlist_only_uses_neutral_wording_when_market_text_conflicts(monke
     assert "market regime improves" not in message
 
 
-def test_v3_enter_next_action_no_longer_says_consider_entry(monkeypatch):
+def test_v3_enter_next_action_uses_trading_stop_wording(monkeypatch):
     monkeypatch.setattr("message_formatter._timestamp", lambda: "2026-05-09 16:00 EDT")
     monkeypatch.setattr("message_formatter.ENABLE_V3_TELEGRAM_FORMAT", True)
     message = format_trade_signal_message(_signal(
         v3_decision=_full_v3_decision(
-            next_action="Enter only if the planned buy stop triggers and the defined stop remains valid.",
+            next_action="Enter only if the planned buy stop triggers and the trading stop remains valid.",
         ),
     ))
 
     assert "Consider entry" not in message
-    assert "What to do next: Enter only if the planned buy stop triggers and the defined stop remains valid." in message
+    assert "defined stop" not in message
+    assert "What to do next: Enter only if the planned buy stop triggers and the trading stop remains valid." in message
 
 
 def test_v3_wait_labels_reference_levels_without_tradable_targets(monkeypatch):
@@ -671,6 +676,28 @@ def test_v3_normal_message_length_stays_reasonable(monkeypatch):
     ))
 
     assert len(message) < 1800
+
+
+def test_v3_watchlist_summary_uses_preview_header_and_stays_compact(monkeypatch):
+    monkeypatch.setattr("message_formatter._timestamp", lambda: "2026-05-09 16:00 EDT")
+    monkeypatch.setattr("message_formatter.ENABLE_V3_TELEGRAM_FORMAT", True)
+
+    message = format_watchlist_summary([
+        _signal(ticker="AAPL", grade="B", score=74, is_near_breakout=True),
+        _signal(ticker="AMAT", grade="B", score=73, is_near_breakout=False),
+    ], {"summary": "Bullish market regime"})
+
+    assert message == "\n".join([
+        "📋 Signal Bot V3 Preview - B Watchlist",
+        "🏛 Market: Bullish market regime",
+        "👀 AAPL | B | 74",
+        "📈 AMAT | B | 73",
+        "Timestamp: 2026-05-09 16:00 EDT",
+    ])
+    assert "Trade decision:" not in message
+    assert "WATCHLIST ONLY" not in message
+    assert "AVOID" not in message
+    assert len(message.splitlines()) == 5
 
 
 def test_v3_avoid_trade_alert_demotes_v2_levels(monkeypatch):

@@ -95,7 +95,9 @@ def test_trade_signal_message_contains_required_v2_fields_without_becoming_huge(
     assert len(message) < 1200
 
 
-def test_market_summary_and_watchlist_are_short_and_readable():
+def test_market_summary_and_watchlist_are_short_and_readable(monkeypatch):
+    monkeypatch.setattr("message_formatter.ENABLE_V3_TELEGRAM_FORMAT", False)
+    monkeypatch.setattr("message_formatter._timestamp", lambda: "2026-05-09 16:00 EDT")
     market_message = format_market_summary(_regime(is_valid=False, invalid_reasons=["SPY close <= 50EMA"]))
     watchlist = format_watchlist_summary([
         _signal(ticker="MSFT", grade="B", score=69, is_near_breakout=True),
@@ -108,6 +110,24 @@ def test_market_summary_and_watchlist_are_short_and_readable():
     assert "👀 NVDA | B | 74" in watchlist
     assert "👀 MSFT | B | 69" in watchlist
     assert watchlist.index("NVDA") < watchlist.index("MSFT")
+
+
+def test_v2_watchlist_exact_output_unchanged_when_v3_format_disabled(monkeypatch):
+    monkeypatch.setattr("message_formatter.ENABLE_V3_TELEGRAM_FORMAT", False)
+    monkeypatch.setattr("message_formatter._timestamp", lambda: "2026-05-09 16:00 EDT")
+
+    watchlist = format_watchlist_summary([
+        _signal(ticker="MSFT", grade="B", score=69, is_near_breakout=True),
+        _signal(ticker="NVDA", grade="B", score=74, is_near_breakout=True),
+    ], _regime())
+
+    assert watchlist == "\n".join([
+        "📋 Signal Bot V2 - B Watchlist",
+        "🏛 Market: Bullish market regime",
+        "👀 NVDA | B | 74",
+        "👀 MSFT | B | 69",
+        "Timestamp: 2026-05-09 16:00 EDT",
+    ])
 
 
 def test_invalid_market_regime_stops_before_universe_or_stock_scanning(monkeypatch):

@@ -364,6 +364,7 @@ def qualify_snapshot(
     diagnostics: dict | None = None,
     debug: bool = False,
     log_rejects: bool = True,
+    log_relative_strength: bool = True,
 ) -> dict | None:
     """Run one stock snapshot through V2 liquidity, RS, VCP, risk, and scoring."""
     try:
@@ -385,7 +386,12 @@ def qualify_snapshot(
                 _reject(ticker, liquidity["reject_reasons"])
             return None
 
-        relative_strength = evaluate_relative_strength(enriched, spy_return, qqq_return)
+        relative_strength = evaluate_relative_strength(
+            enriched,
+            spy_return,
+            qqq_return,
+            log_lagging=log_relative_strength,
+        )
         setup = evaluate_vcp_setup(enriched)
         trade_plan = build_trade_plan(enriched)
         _record_setup_funnel(diagnostics, relative_strength, setup)
@@ -459,6 +465,7 @@ def run_v2_scan(
     send_telegram: bool = True,
     write_journal: bool = True,
     log_rejects: bool = True,
+    log_relative_strength: bool = True,
 ) -> dict:
     """Run the full V2 EOD scan with the market hard gate first."""
     try:
@@ -515,6 +522,7 @@ def run_v2_scan(
                 diagnostics=diagnostics,
                 debug=debug,
                 log_rejects=log_rejects,
+                log_relative_strength=log_relative_strength,
             )
             if candidate is not None:
                 setup_passed += 1

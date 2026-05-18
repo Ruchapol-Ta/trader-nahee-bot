@@ -119,6 +119,24 @@ def test_run_v2_scan_default_behavior_still_logs_rejects(monkeypatch):
     assert result["reject_reasons"]["rejected_by_liquidity"] == 1
 
 
+def test_run_v2_scan_default_behavior_still_logs_relative_strength(monkeypatch):
+    captured = []
+    qualified = {"AAA": _signal("AAA", "A", 82)}
+    _patch_scan_inputs(monkeypatch, qualified)
+    monkeypatch.setattr(v2_engine, "send_v2_report", lambda *args: 1)
+
+    def fake_qualify(snapshot, market_regime, spy_return, qqq_return, **kwargs):
+        captured.append(kwargs.get("log_relative_strength"))
+        return qualified[snapshot["ticker"]].copy()
+
+    monkeypatch.setattr(v2_engine, "qualify_snapshot", fake_qualify)
+
+    result = v2_engine.run_v2_scan()
+
+    assert captured == [True]
+    assert result["messages_sent"] == 1
+
+
 def test_run_v2_scan_default_behavior_still_writes_journal_when_enabled(monkeypatch):
     journal_calls = {"signals": 0, "summary": 0}
     qualified = {"AAA": _signal("AAA", "A", 82)}
@@ -247,11 +265,13 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
         send_telegram=True,
         write_journal=True,
         log_rejects=True,
+        log_relative_strength=True,
     ):
         assert debug is False
         assert send_telegram is False
         assert write_journal is False
         assert log_rejects is False
+        assert log_relative_strength is False
         assert v2_engine.ENABLE_V3_DECISION_LAYER is True
         return {
             "market_regime": "Bullish market regime",

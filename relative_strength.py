@@ -21,6 +21,7 @@ def evaluate_relative_strength(
     data: dict,
     spy_return_20d: float | None,
     qqq_return_20d: float | None,
+    log_lagging: bool = True,
 ) -> dict:
     """Check whether a stock outperformed SPY or QQQ over the configured lookback."""
     try:
@@ -44,7 +45,7 @@ def evaluate_relative_strength(
             reasons.append("outperformed QQQ")
 
         passed = bool(reasons)
-        if not passed:
+        if not passed and log_lagging:
             logger.info(
                 f"[RelativeStrength] {ticker}: lagged SPY/QQQ "
                 f"({stock_return:.2f}% vs {spy_return:.2f}%/{qqq_return:.2f}%)"

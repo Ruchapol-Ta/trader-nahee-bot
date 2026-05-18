@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -72,3 +73,32 @@ def test_relative_strength_rejects_when_stock_lags_both_benchmarks():
     assert result["passed"] is False
     assert result["score"] == 0
     assert "did not outperform SPY or QQQ" in result["reject_reasons"]
+
+
+def test_relative_strength_default_logs_lagging_ticker(caplog):
+    caplog.set_level(logging.INFO, logger="relative_strength")
+
+    result = evaluate_relative_strength(
+        {"ticker": "AAPL", "return_20d": 3.0},
+        spy_return_20d=4.0,
+        qqq_return_20d=5.0,
+    )
+
+    assert result["passed"] is False
+    assert "[RelativeStrength] AAPL: lagged SPY/QQQ" in caplog.text
+
+
+def test_relative_strength_can_suppress_lagging_ticker_log(caplog):
+    caplog.set_level(logging.INFO, logger="relative_strength")
+
+    result = evaluate_relative_strength(
+        {"ticker": "AAPL", "return_20d": 3.0},
+        spy_return_20d=4.0,
+        qqq_return_20d=5.0,
+        log_lagging=False,
+    )
+
+    assert result["passed"] is False
+    assert result["score"] == 0
+    assert "did not outperform SPY or QQQ" in result["reject_reasons"]
+    assert "lagged SPY/QQQ" not in caplog.text

@@ -133,6 +133,7 @@ def run_v3_dry_run_review() -> dict:
             send_telegram=False,
             write_journal=False,
             log_rejects=False,
+            log_relative_strength=False,
         )
     finally:
         v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer

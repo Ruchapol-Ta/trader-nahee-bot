@@ -175,3 +175,132 @@ def test_v3_preview_formatting_does_not_require_prod_rollout_readiness(monkeypat
 
     assert readiness["ready"] is True
     assert message.startswith("Signal Bot V3 Preview")
+
+
+def test_rollout_dry_run_checklist_does_not_call_network_or_send(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "prod")
+    monkeypatch.setenv("TELEGRAM_PROD_CHAT_ID", "prod-chat")
+
+    def fail_post(*args, **kwargs):
+        raise AssertionError("dry-run checklist must not call Telegram")
+
+    def fail_send_message(*args, **kwargs):
+        raise AssertionError("dry-run checklist must not send messages")
+
+    monkeypatch.setattr(telegram_sender.requests, "post", fail_post)
+    monkeypatch.setattr(telegram_sender, "send_message", fail_send_message)
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is True
+    assert checklist["mode"] == "prod"
+
+
+def test_rollout_dry_run_unset_target_mode_reports_legacy_fallback(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.delenv("TELEGRAM_TARGET_MODE", raising=False)
+    monkeypatch.delenv("TELEGRAM_TEST_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_PROD_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "legacy-chat")
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is True
+    assert checklist["target_mode"] == ""
+    assert checklist["mode"] == "legacy"
+    assert checklist["required_chat_id_name"] == "TELEGRAM_CHAT_ID"
+    assert checklist["required_chat_id_present"] is True
+    assert checklist["legacy_mode_active"] is True
+    assert checklist["legacy_fallback_allowed"] is True
+    assert checklist["legacy_fallback_active"] is True
+
+
+def test_rollout_dry_run_test_mode_does_not_require_prod_chat_id(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "test")
+    monkeypatch.setenv("TELEGRAM_TEST_CHAT_ID", "test-chat")
+    monkeypatch.delenv("TELEGRAM_PROD_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "legacy-chat")
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is True
+    assert checklist["mode"] == "test"
+    assert checklist["required_chat_id_name"] == "TELEGRAM_TEST_CHAT_ID"
+    assert checklist["required_chat_id_present"] is True
+    assert checklist["legacy_fallback_allowed"] is False
+    assert checklist["test_mode_requires_telegram_prod_chat_id"] is False
+
+
+def test_rollout_dry_run_preview_mode_does_not_require_prod_chat_id(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "preview")
+    monkeypatch.setenv("TELEGRAM_TEST_CHAT_ID", "test-chat")
+    monkeypatch.delenv("TELEGRAM_PROD_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "legacy-chat")
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is True
+    assert checklist["mode"] == "preview"
+    assert checklist["required_chat_id_name"] == "TELEGRAM_TEST_CHAT_ID"
+    assert checklist["required_chat_id_present"] is True
+    assert checklist["legacy_fallback_allowed"] is False
+    assert checklist["preview_mode_requires_telegram_prod_chat_id"] is False
+    assert checklist["v3_preview_format_available_without_prod_rollout"] is True
+
+
+def test_rollout_dry_run_prod_mode_blocks_legacy_chat_only(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "prod")
+    monkeypatch.delenv("TELEGRAM_PROD_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "legacy-chat")
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is False
+    assert checklist["mode"] == "prod"
+    assert checklist["required_chat_id_name"] == "TELEGRAM_PROD_CHAT_ID"
+    assert checklist["required_chat_id_present"] is False
+    assert checklist["legacy_fallback_allowed"] is False
+    assert checklist["legacy_fallback_active"] is False
+    assert checklist["explicit_prod_requires_telegram_prod_chat_id"] is True
+    assert checklist["explicit_prod_blocks_legacy_fallback"] is True
+    assert "TELEGRAM_PROD_CHAT_ID is required" in checklist["errors"][0]
+
+
+def test_rollout_dry_run_prod_mode_ready_with_prod_chat(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "prod")
+    monkeypatch.setenv("TELEGRAM_PROD_CHAT_ID", "prod-chat")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "legacy-chat")
+
+    checklist = telegram_sender.build_telegram_rollout_dry_run_checklist()
+
+    assert checklist["ready"] is True
+    assert checklist["mode"] == "prod"
+    assert checklist["required_chat_id_name"] == "TELEGRAM_PROD_CHAT_ID"
+    assert checklist["required_chat_id_present"] is True
+    assert checklist["legacy_fallback_allowed"] is False
+    assert checklist["explicit_prod_blocks_legacy_fallback"] is True
+    assert checklist["errors"] == []
+
+
+def test_rollout_dry_run_checklist_does_not_expose_secret_values(monkeypatch):
+    token = "123456789:secret-token-value"
+    test_chat = "test-chat-secret-value"
+    prod_chat = "prod-chat-secret-value"
+    legacy_chat = "legacy-chat-secret-value"
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", token)
+    monkeypatch.setenv("TELEGRAM_TARGET_MODE", "prod")
+    monkeypatch.setenv("TELEGRAM_TEST_CHAT_ID", test_chat)
+    monkeypatch.setenv("TELEGRAM_PROD_CHAT_ID", prod_chat)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", legacy_chat)
+
+    checklist_text = repr(telegram_sender.build_telegram_rollout_dry_run_checklist())
+
+    assert token not in checklist_text
+    assert test_chat not in checklist_text
+    assert prod_chat not in checklist_text
+    assert legacy_chat not in checklist_text

@@ -16,6 +16,7 @@ import time
 import requests
 from dotenv import load_dotenv
 
+import config as runtime_config
 from formatter import format_signal_message, format_summary_message
 from message_formatter import (
     format_market_summary,
@@ -74,6 +75,64 @@ def check_limited_live_rollout_readiness() -> dict:
         "target_mode": "",
         "is_live_rollout": False,
         "errors": ["TELEGRAM_TARGET_MODE=prod is required for limited live rollout"],
+    }
+
+
+def build_telegram_rollout_dry_run_checklist() -> dict:
+    """Build a safe Telegram rollout checklist without sending anything."""
+    target_mode = _target_mode()
+    mode = target_mode or "legacy"
+    token_present = bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
+    legacy_chat_present = bool(os.environ.get("TELEGRAM_CHAT_ID"))
+    test_chat_present = bool(os.environ.get("TELEGRAM_TEST_CHAT_ID"))
+    prod_chat_present = bool(os.environ.get("TELEGRAM_PROD_CHAT_ID"))
+
+    required_chat_id_name = None
+    required_chat_id_present = False
+    errors: list[str] = []
+
+    if not token_present:
+        errors.append("TELEGRAM_BOT_TOKEN is missing")
+
+    if target_mode == "prod":
+        required_chat_id_name = "TELEGRAM_PROD_CHAT_ID"
+        required_chat_id_present = prod_chat_present
+        if not prod_chat_present:
+            errors.append("TELEGRAM_PROD_CHAT_ID is required for explicit prod mode")
+    elif target_mode in {"test", "preview"}:
+        required_chat_id_name = "TELEGRAM_TEST_CHAT_ID"
+        required_chat_id_present = test_chat_present
+        if not test_chat_present:
+            errors.append(f"TELEGRAM_TEST_CHAT_ID is required for {target_mode} mode")
+    elif target_mode:
+        errors.append("TELEGRAM_TARGET_MODE must be 'test', 'preview', or 'prod'")
+    else:
+        required_chat_id_name = "TELEGRAM_CHAT_ID"
+        required_chat_id_present = legacy_chat_present
+        if not legacy_chat_present:
+            errors.append("TELEGRAM_CHAT_ID is required when TELEGRAM_TARGET_MODE is unset")
+
+    return {
+        "ready": not errors,
+        "target_mode": target_mode,
+        "mode": mode,
+        "required_token_present": token_present,
+        "required_chat_id_name": required_chat_id_name,
+        "required_chat_id_present": required_chat_id_present,
+        "legacy_mode_active": target_mode == "",
+        "legacy_fallback_allowed": target_mode == "",
+        "legacy_fallback_active": target_mode == "" and legacy_chat_present,
+        "explicit_prod_requires_telegram_prod_chat_id": target_mode == "prod",
+        "explicit_prod_blocks_legacy_fallback": target_mode == "prod",
+        "test_mode_requires_telegram_prod_chat_id": False,
+        "preview_mode_requires_telegram_prod_chat_id": False,
+        "v3_preview_format_available_without_prod_rollout": bool(
+            hasattr(runtime_config, "ENABLE_V3_TELEGRAM_FORMAT")
+            and callable(format_market_summary)
+            and callable(format_trade_signal_message)
+            and callable(format_watchlist_summary)
+        ),
+        "errors": errors,
     }
 
 

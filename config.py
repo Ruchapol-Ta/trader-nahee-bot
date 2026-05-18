@@ -29,6 +29,114 @@ DATA_PERIOD = "18mo"        # yfinance lookback; enough history for stable EMA20
 DATA_INTERVAL = "1d"
 MIN_DATA_ROWS = 250
 
+# === V2 Trade Qualification Engine ===
+V2_MARKET_SYMBOLS = ("SPY", "QQQ")
+V2_SETUP_TYPE = "VCP Breakout"
+
+# Liquidity
+V2_MIN_PRICE = 10.0
+V2_MIN_AVG_VOLUME = 1_000_000
+V2_MIN_AVG_DOLLAR_VOLUME = 20_000_000
+V2_MIN_MARKET_CAP = 2_000_000_000
+
+# Indicator windows
+ATR_PERIOD = 14
+ATR_SMA_WINDOW = 20
+RELATIVE_STRENGTH_LOOKBACK = 20
+HIGH_52W_LOOKBACK = 252
+VCP_PIVOT_LOOKBACK = 20
+VCP_CONTRACTION_LOOKBACK_SHORT = 5
+VCP_CONTRACTION_LOOKBACK_MID = 10
+VCP_CONTRACTION_LOOKBACK_LONG = 20
+
+# Setup thresholds
+VCP_MAX_52W_HIGH_DISTANCE = 0.05
+VCP_RANGE_TIGHTENING_RATIO = 0.85
+VCP_ATR_CONTRACTION_RATIO = 0.90
+VCP_VOLUME_DRY_UP_RATIO = 0.80
+VCP_BREAKOUT_VOLUME_RATIO = 1.00
+VCP_NEAR_BREAKOUT_THRESHOLD = 0.015
+
+# Scoring / grading
+V2_SCORE_A_PLUS_MIN = 85
+V2_SCORE_A_MIN = 75
+V2_SCORE_B_MIN = 65
+V2_SCORE_C_MIN = 50
+V2_SCORE_WEIGHTS = {
+    "market_regime": 10,
+    "liquidity": 10,
+    "trend_structure": 15,
+    "relative_strength": 15,
+    "high_52w_proximity": 10,
+    "consolidation_tightness": 10,
+    "atr_contraction": 10,
+    "volume_quality": 10,
+    "risk_reward": 10,
+}
+V2_MAX_TRADE_SIGNALS = 20
+V2_MAX_WATCHLIST = 10
+
+# Risk framework
+V2_RISK_PER_TRADE = 0.01
+V2_MAX_OPEN_POSITIONS = 5
+V2_MAX_TOTAL_PORTFOLIO_RISK = 0.05
+V2_MAX_NEW_POSITIONS_PER_DAY = 2
+V2_MAX_SAME_SECTOR_POSITIONS = 2
+V2_PYRAMID_MIN_R = 1.5
+V2_ADD_ON_MAX_SIZE_PCT = 0.50
+V2_TARGET_1_R = 2.5
+V2_TARGET_2_R = 4.0
+V2_STOP_BUFFER_PCT = 0.005
+V2_BUY_STOP_BUFFER_PCT = 0.001
+V2_HOLDING_STYLE = "Swing: 3 trading days to 8 weeks; trail with 10EMA/20EMA"
+
+# === Pre-V3 Foundation ===
+ENABLE_V3_DECISION_LAYER = False
+ENABLE_SIGNAL_JOURNAL = True
+ENABLE_POSITION_SIZING = False
+ENABLE_V3_TELEGRAM_FORMAT = False
+
+JOURNAL_PATH = "data/signal_journal.jsonl"
+
+MOCK_PORTFOLIO_SIZE = 10000.0
+DEFAULT_RISK_PER_TRADE_PCT = 0.01
+
+RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_TINY_PCT = 0.0025
+RISK_MODE_SMALL_PCT = 0.005
+RISK_MODE_NORMAL_PCT = 0.01
+RISK_MODE_AGGRESSIVE_PCT = 0.02
+
+# V3 decision thresholds. These annotate V2-selected signals only.
+V3_ENTER_MIN_SCORE = V2_SCORE_A_MIN
+V3_WATCHLIST_MIN_SCORE = V2_SCORE_B_MIN
+V3_ENTER_MIN_RR = V2_TARGET_1_R
+V3_WATCHLIST_MIN_RR = 2.0
+
+V3_RISK_PROFILE = "conservative"
+V3_RISK_PROFILES = {
+    "conservative": {
+        "enter_max_stop_pct": 0.08,
+    },
+    "balanced": {
+        "enter_max_stop_pct": 0.10,
+    },
+    "aggressive": {
+        "enter_max_stop_pct": 0.12,
+    },
+}
+V3_ENTER_MAX_STOP_DISTANCE_PCT = 0.08
+V3_AVOID_MAX_STOP_DISTANCE_PCT = 0.12
+V3_MIN_TACTICAL_STOP_DISTANCE_PCT = 0.025
+V3_ATR_STOP_MULTIPLE = 1.5
+
+V3_ENTER_MAX_EXTENSION_FROM_EMA20_PCT = 0.08
+V3_ENTER_MAX_EXTENSION_FROM_EMA50_PCT = 0.20
+V3_AVOID_EXTENSION_FROM_EMA50_PCT = 0.30
+
+V3_ENTER_MIN_VOLUME_RATIO = 1.10
+V3_WAIT_MIN_VOLUME_RATIO = VCP_BREAKOUT_VOLUME_RATIO
+
 # === Universe Sanity Thresholds ===
 # Fix #2 — refuse to proceed when a core source returns a crippled list.
 EXPECTED_MIN_SP500 = 450
@@ -57,3 +165,18 @@ assert MAX_SIGNALS > 0, "MAX_SIGNALS must be positive"
 assert MIN_DATA_ROWS >= EMA_LONG, "MIN_DATA_ROWS must cover EMA_LONG"
 assert RSI_PULLBACK_MIN < RSI_PULLBACK_MAX, "invalid RSI pullback band"
 assert 0 <= SCHEDULE_HOUR < 24 and 0 <= SCHEDULE_MINUTE < 60, "invalid schedule time"
+assert V2_MIN_PRICE > 0, "V2_MIN_PRICE must be positive"
+assert V2_MIN_AVG_VOLUME > 0, "V2_MIN_AVG_VOLUME must be positive"
+assert V2_MIN_AVG_DOLLAR_VOLUME > 0, "V2_MIN_AVG_DOLLAR_VOLUME must be positive"
+assert V2_MIN_MARKET_CAP > 0, "V2_MIN_MARKET_CAP must be positive"
+assert sum(V2_SCORE_WEIGHTS.values()) == 100, "V2 score weights must total 100"
+assert V2_SCORE_A_PLUS_MIN > V2_SCORE_A_MIN > V2_SCORE_B_MIN > V2_SCORE_C_MIN
+assert 0 < V2_STOP_BUFFER_PCT < 1, "V2_STOP_BUFFER_PCT must be in (0, 1)"
+assert V2_TARGET_2_R > V2_TARGET_1_R > 0, "invalid V2 target multiples"
+assert 0 < V3_MIN_TACTICAL_STOP_DISTANCE_PCT < 1, "V3_MIN_TACTICAL_STOP_DISTANCE_PCT must be in (0, 1)"
+assert V3_ATR_STOP_MULTIPLE > 0, "V3_ATR_STOP_MULTIPLE must be positive"
+assert V3_RISK_PROFILE in V3_RISK_PROFILES, "V3_RISK_PROFILE must be a supported profile"
+assert V3_RISK_PROFILES["conservative"]["enter_max_stop_pct"] == V3_ENTER_MAX_STOP_DISTANCE_PCT
+assert all(
+    0 < profile["enter_max_stop_pct"] < 1 for profile in V3_RISK_PROFILES.values()
+), "V3 risk profile stop thresholds must be in (0, 1)"

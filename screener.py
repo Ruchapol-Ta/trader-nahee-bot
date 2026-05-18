@@ -16,6 +16,10 @@ from config import (
     EMA_FAST, EMA_MID, EMA_LONG, RSI_PERIOD,
     DATA_PERIOD, DATA_INTERVAL,
     MIN_DATA_ROWS, VOLUME_WINDOW, SL_SWING_LOOKBACK,
+    ATR_PERIOD, ATR_SMA_WINDOW, HIGH_52W_LOOKBACK,
+    RELATIVE_STRENGTH_LOOKBACK, VCP_CONTRACTION_LOOKBACK_SHORT,
+    VCP_CONTRACTION_LOOKBACK_MID, VCP_CONTRACTION_LOOKBACK_LONG,
+    VCP_PIVOT_LOOKBACK,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,24 @@ def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return rsi.fillna(50.0)
 
 
+def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
+    """Compute ATR with Wilder-style smoothing from a daily OHLC frame."""
+    try:
+        high = df["High"].squeeze()
+        low = df["Low"].squeeze()
+        close = df["Close"].squeeze()
+        prev_close = close.shift(1)
+        true_range = pd.concat([
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        return true_range.ewm(com=period - 1, min_periods=period).mean()
+    except Exception as e:
+        logger.warning(f"[Screener] ATR computation failed: {e}")
+        return pd.Series(dtype="float64")
+
+
 def compute_series(df: pd.DataFrame) -> dict | None:
     """
     Compute the full indicator series for one ticker's OHLCV frame.
@@ -50,6 +72,7 @@ def compute_series(df: pd.DataFrame) -> dict | None:
     low = df["Low"].squeeze()
     close = df["Close"].squeeze()
     volume = df["Volume"].squeeze()
+    atr = compute_atr(df, ATR_PERIOD)
     return {
         "open": open_,
         "high": high,
@@ -62,23 +85,69 @@ def compute_series(df: pd.DataFrame) -> dict | None:
         "ema_long": close.ewm(span=EMA_LONG, adjust=False).mean(),
         "rsi": compute_rsi(close, RSI_PERIOD),
         "vol_sma20": volume.rolling(VOLUME_WINDOW).mean(),
+        "atr": atr,
+        "atr_sma20": atr.rolling(ATR_SMA_WINDOW).mean(),
     }
+
+
+def _pct_range(high: pd.Series, low: pd.Series, close: float, lookback: int) -> float:
+    """Return the high-low range over a lookback as a percent of close."""
+    try:
+        if close <= 0:
+            return 0.0
+        window_high = float(high.iloc[-lookback:].max())
+        window_low = float(low.iloc[-lookback:].min())
+        return (window_high - window_low) / close
+    except Exception as e:
+        logger.warning(f"[Screener] Range calculation failed: {e}")
+        return 0.0
+
+
+def _return_over_lookback(close: pd.Series, lookback: int) -> float:
+    """Return percent change over a fixed trading-day lookback."""
+    try:
+        if len(close) <= lookback:
+            return 0.0
+        start = float(close.iloc[-lookback - 1])
+        end = float(close.iloc[-1])
+        if start == 0:
+            return 0.0
+        return ((end - start) / start) * 100
+    except Exception as e:
+        logger.warning(f"[Screener] Lookback return calculation failed: {e}")
+        return 0.0
 
 
 def latest_snapshot(ticker: str, series: dict) -> dict | None:
     """Collapse a series dict into a single-row snapshot for the latest bar."""
     try:
         close = series["close"]
+        high = series["high"]
         low = series["low"]
         volume = series["volume"]
         today_close = float(close.iloc[-1])
         prev_close = float(close.iloc[-2])
         if prev_close == 0:
             return None
+        avg_volume = float(volume.iloc[-VOLUME_WINDOW:].mean())
+        dollar_volume = close * volume
+        latest_index = close.index[-1]
+        latest_bar_date = (
+            latest_index.date().isoformat()
+            if hasattr(latest_index, "date")
+            else str(latest_index)
+        )
+        pivot_window = high.iloc[-VCP_PIVOT_LOOKBACK - 1:-1]
+        pivot_low_window = low.iloc[-VCP_PIVOT_LOOKBACK - 1:-1]
+        if pivot_window.empty:
+            pivot_window = high.iloc[-VCP_PIVOT_LOOKBACK:]
+        if pivot_low_window.empty:
+            pivot_low_window = low.iloc[-VCP_PIVOT_LOOKBACK:]
         return {
             "ticker": ticker,
+            "latest_bar_date": latest_bar_date,
             "open": float(series["open"].iloc[-1]),
-            "high": float(series["high"].iloc[-1]),
+            "high": float(high.iloc[-1]),
             "low": float(low.iloc[-1]),
             "close": today_close,
             "pct_change": ((today_close - prev_close) / prev_close) * 100,
@@ -88,9 +157,25 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "ema_long": float(series["ema_long"].iloc[-1]),
             "rsi": float(series["rsi"].iloc[-1]),
             "volume": float(volume.iloc[-1]),
-            "avg_volume": float(volume.iloc[-VOLUME_WINDOW:].mean()),
+            "avg_volume": avg_volume,
             "vol_sma20": float(series["vol_sma20"].iloc[-1]),
             "swing_low_5": float(low.iloc[-SL_SWING_LOOKBACK:].min()),
+            "avg_dollar_volume": float(dollar_volume.iloc[-VOLUME_WINDOW:].mean()),
+            "return_20d": _return_over_lookback(close, RELATIVE_STRENGTH_LOOKBACK),
+            "high_52w": float(high.iloc[-HIGH_52W_LOOKBACK:].max()),
+            "range_5d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_SHORT),
+            "range_10d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_MID),
+            "range_20d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_LONG),
+            "atr": float(series["atr"].iloc[-1]),
+            "atr_sma20": float(series["atr_sma20"].iloc[-1]),
+            "consolidation_volume": float(
+                volume.iloc[-VCP_CONTRACTION_LOOKBACK_SHORT:].mean()
+            ),
+            "pivot": float(pivot_window.max()),
+            "pivot_low": float(pivot_low_window.min()),
+            "contraction_low": float(
+                low.iloc[-VCP_CONTRACTION_LOOKBACK_MID:].min()
+            ),
         }
     except (IndexError, ValueError, KeyError) as e:
         logger.warning(f"[Screener] {ticker}: snapshot error — {e}")

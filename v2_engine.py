@@ -363,6 +363,7 @@ def qualify_snapshot(
     qqq_return: float,
     diagnostics: dict | None = None,
     debug: bool = False,
+    log_rejects: bool = True,
 ) -> dict | None:
     """Run one stock snapshot through V2 liquidity, RS, VCP, risk, and scoring."""
     try:
@@ -371,7 +372,8 @@ def qualify_snapshot(
         if not basic_liquidity["passed"]:
             _record_rejects(diagnostics, basic_liquidity["reject_reasons"])
             _record_rejected_candidate(diagnostics)
-            _reject(ticker, basic_liquidity["reject_reasons"])
+            if log_rejects:
+                _reject(ticker, basic_liquidity["reject_reasons"])
             return None
 
         enriched = enrich_with_market_metadata(data)
@@ -379,7 +381,8 @@ def qualify_snapshot(
         if not liquidity["passed"]:
             _record_rejects(diagnostics, liquidity["reject_reasons"])
             _record_rejected_candidate(diagnostics)
-            _reject(ticker, liquidity["reject_reasons"])
+            if log_rejects:
+                _reject(ticker, liquidity["reject_reasons"])
             return None
 
         relative_strength = evaluate_relative_strength(enriched, spy_return, qqq_return)
@@ -397,7 +400,8 @@ def qualify_snapshot(
             _record_rejects(diagnostics, reject_reasons)
             _record_rejected_candidate(diagnostics)
             _record_near_miss(diagnostics, debug, enriched, setup, score, reject_reasons)
-            _reject(ticker, reject_reasons)
+            if log_rejects:
+                _reject(ticker, reject_reasons)
             return None
 
         if diagnostics is not None:
@@ -421,7 +425,8 @@ def qualify_snapshot(
             _record_rejects(diagnostics, grade_reasons)
             _record_rejected_candidate(diagnostics)
             _record_near_miss(diagnostics, debug, enriched, setup, score, grade_reasons)
-            _reject(ticker, grade_reasons)
+            if log_rejects:
+                _reject(ticker, grade_reasons)
             return None
 
         pass_reasons = (
@@ -453,6 +458,7 @@ def run_v2_scan(
     debug: bool = False,
     send_telegram: bool = True,
     write_journal: bool = True,
+    log_rejects: bool = True,
 ) -> dict:
     """Run the full V2 EOD scan with the market hard gate first."""
     try:
@@ -473,10 +479,13 @@ def run_v2_scan(
                 "market_regime": market_regime.get("summary", "Unknown"),
                 "messages_sent": sent,
                 "telegram_skipped": not send_telegram,
+                "journal_skipped": True,
                 "scanned": 0,
                 "liquidity_passed": 0,
                 "setup_passed": 0,
                 "grades": {},
+                "funnel": _new_diagnostics()["funnel"],
+                "reject_reasons": {},
                 "trade_signals": 0,
                 "watchlist": 0,
                 "v3_decision_counts": _v3_decision_counts([], []),
@@ -505,6 +514,7 @@ def run_v2_scan(
                 qqq_return,
                 diagnostics=diagnostics,
                 debug=debug,
+                log_rejects=log_rejects,
             )
             if candidate is not None:
                 setup_passed += 1
@@ -588,6 +598,7 @@ def run_v2_scan(
             "market_regime": market_regime.get("summary", "Unknown"),
             "messages_sent": sent,
             "telegram_skipped": not send_telegram,
+            "journal_skipped": not (ENABLE_SIGNAL_JOURNAL and write_journal),
             "funnel": stats["funnel"],
             "reject_reasons": stats["reject_reasons"],
             "near_misses": near_misses,

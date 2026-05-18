@@ -60,6 +60,22 @@ def _format_decision_counts(counts: dict) -> str:
     return " | ".join(f"{key}: {counts.get(key, 0)}" for key in ordered)
 
 
+def _format_key_counts(values: dict | None, limit: int | None = None) -> str:
+    if not values:
+        return "none"
+    items = [
+        (str(key), value)
+        for key, value in values.items()
+        if value not in (None, 0, {}, [])
+    ]
+    if not items:
+        return "none"
+    items.sort(key=lambda item: (-int(item[1]) if isinstance(item[1], int) else 0, item[0]))
+    if limit is not None:
+        items = items[:limit]
+    return " | ".join(f"{key}: {value}" for key, value in items)
+
+
 def format_v3_dry_run_review(result: dict) -> str:
     """Format a compact V3 dry-run review without exposing credentials."""
     lines = [
@@ -72,8 +88,11 @@ def format_v3_dry_run_review(result: dict) -> str:
             f"{result.get('trade_signals', 0)} trade alerts | "
             f"{result.get('watchlist', 0)} watchlist"
         ),
+        f"V2 funnel: {_format_key_counts(result.get('funnel'))}",
+        f"Reject aggregation: {_format_key_counts(result.get('reject_reasons'), limit=5)}",
         f"V3 decisions: {_format_decision_counts(result.get('v3_decision_counts') or {})}",
         f"Telegram delivery: {'skipped' if result.get('telegram_skipped') else 'enabled'}",
+        f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",
     ]
 
     samples = result.get("v3_sample_decisions") or []
@@ -113,6 +132,7 @@ def run_v3_dry_run_review() -> dict:
             debug="--debug-v2" in sys.argv,
             send_telegram=False,
             write_journal=False,
+            log_rejects=False,
         )
     finally:
         v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer

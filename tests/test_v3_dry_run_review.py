@@ -70,6 +70,23 @@ def _patch_scan_inputs(monkeypatch, qualified):
     )
 
 
+def _patch_liquidity_reject_scan(monkeypatch):
+    monkeypatch.setattr(v2_engine, "ENABLE_SIGNAL_JOURNAL", False)
+    monkeypatch.setattr(v2_engine, "load_market_regime", lambda: _regime())
+    monkeypatch.setattr(v2_engine, "get_v2_universe", lambda: ["BAD"])
+    monkeypatch.setattr(v2_engine, "screen_universe", lambda tickers: [{"ticker": "BAD"}])
+    monkeypatch.setattr(
+        v2_engine,
+        "evaluate_liquidity",
+        lambda snapshot, check_market_cap=False: {
+            "passed": False,
+            "reasons": [],
+            "reject_reasons": ["price < 10.00"],
+        },
+    )
+    monkeypatch.setattr(v2_engine, "send_v2_report", lambda *args: 0)
+
+
 def test_run_v2_scan_default_behavior_still_sends_report(monkeypatch):
     captured = {"called": False}
     qualified = {"AAA": _signal("AAA", "A", 82)}
@@ -89,6 +106,17 @@ def test_run_v2_scan_default_behavior_still_sends_report(monkeypatch):
     assert captured["called"] is True
     assert result["messages_sent"] == 1
     assert result["telegram_skipped"] is False
+
+
+def test_run_v2_scan_default_behavior_still_logs_rejects(monkeypatch):
+    rejects = []
+    _patch_liquidity_reject_scan(monkeypatch)
+    monkeypatch.setattr(v2_engine, "_reject", lambda ticker, reasons: rejects.append((ticker, reasons)))
+
+    result = v2_engine.run_v2_scan()
+
+    assert rejects == [("BAD", ["price < 10.00"])]
+    assert result["reject_reasons"]["rejected_by_liquidity"] == 1
 
 
 def test_run_v2_scan_default_behavior_still_writes_journal_when_enabled(monkeypatch):
@@ -153,6 +181,31 @@ def test_run_v2_scan_dry_run_skips_v2_report_and_generates_v3_decisions(monkeypa
     assert all(sample["decision"] for sample in result["v3_sample_decisions"])
 
 
+def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):
+    _patch_liquidity_reject_scan(monkeypatch)
+
+    def fail_reject(*args, **kwargs):
+        raise AssertionError("quiet dry-run must not log per-ticker rejects")
+
+    def fail_report(*args, **kwargs):
+        raise AssertionError("dry-run review must not call send_v2_report")
+
+    monkeypatch.setattr(v2_engine, "_reject", fail_reject)
+    monkeypatch.setattr(v2_engine, "send_v2_report", fail_report)
+
+    result = v2_engine.run_v2_scan(
+        send_telegram=False,
+        write_journal=False,
+        log_rejects=False,
+    )
+
+    assert result["messages_sent"] == 0
+    assert result["telegram_skipped"] is True
+    assert result["journal_skipped"] is True
+    assert result["reject_reasons"]["rejected_by_liquidity"] == 1
+    assert result["funnel"]["rejected_count"] == 1
+
+
 def test_run_v2_scan_dry_run_skips_market_summary_when_market_invalid(monkeypatch):
     monkeypatch.setattr(
         v2_engine,
@@ -188,10 +241,17 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
     monkeypatch.setattr(sys, "argv", ["signal_bot.py", "--v3-dry-run-review"])
     monkeypatch.setattr(v2_engine, "ENABLE_V3_DECISION_LAYER", False)
 
-    def fake_run_v2_scan(*, debug=False, send_telegram=True, write_journal=True):
+    def fake_run_v2_scan(
+        *,
+        debug=False,
+        send_telegram=True,
+        write_journal=True,
+        log_rejects=True,
+    ):
         assert debug is False
         assert send_telegram is False
         assert write_journal is False
+        assert log_rejects is False
         assert v2_engine.ENABLE_V3_DECISION_LAYER is True
         return {
             "market_regime": "Bullish market regime",
@@ -199,7 +259,18 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
             "scanned": 2,
             "trade_signals": 1,
             "watchlist": 1,
+            "funnel": {
+                "scanned": 2,
+                "liquidity_passed": 2,
+                "final_setup_passed": 2,
+                "rejected_count": 3,
+            },
+            "reject_reasons": {
+                "rejected_by_breakout_or_near_breakout": 2,
+                "rejected_by_liquidity": 1,
+            },
             "telegram_skipped": True,
+            "journal_skipped": True,
             "v3_decision_counts": {
                 "ENTER": 1,
                 "WAIT": 0,
@@ -248,6 +319,11 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
     output = capsys.readouterr().out
     assert "V3 Dry Run Review" in output
     assert "Telegram delivery: skipped" in output
+    assert "Journal writes: skipped" in output
+    assert "V2 funnel:" in output
+    assert "scanned: 2" in output
+    assert "Reject aggregation:" in output
+    assert "rejected_by_breakout_or_near_breakout: 2" in output
     assert "V3 decisions: ENTER: 1 | WAIT: 0 | WATCHLIST_ONLY: 1 | AVOID: 0 | none: 0" in output
     assert "AAA | A | ENTER | HIGH" in output
     assert v2_engine.ENABLE_V3_DECISION_LAYER is False

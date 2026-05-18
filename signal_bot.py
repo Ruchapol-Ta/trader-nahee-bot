@@ -21,11 +21,37 @@ from config import (
     SCHEDULE_HOUR, SCHEDULE_MINUTE, TIMEZONE, MISFIRE_GRACE_SEC,
 )
 from logging_config import setup_logging
-from telegram_sender import send_error_alert
+from telegram_sender import build_telegram_rollout_dry_run_checklist, send_error_alert
 from v2_engine import run_v2_scan
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _yes_no(value: object) -> str:
+    return "yes" if bool(value) else "no"
+
+
+def format_telegram_rollout_checklist(checklist: dict) -> str:
+    """Format the Telegram dry-run checklist without including secret values."""
+    lines = [
+        "Telegram Rollout Dry Run",
+        f"Current mode: {checklist.get('mode') or 'legacy'}",
+        f"Token present: {_yes_no(checklist.get('required_token_present'))}",
+        f"Required chat id key: {checklist.get('required_chat_id_name') or 'none'}",
+        f"Required chat id present: {_yes_no(checklist.get('required_chat_id_present'))}",
+        f"Legacy fallback active: {_yes_no(checklist.get('legacy_fallback_active'))}",
+        f"Prod fallback blocked: {_yes_no(checklist.get('explicit_prod_blocks_legacy_fallback'))}",
+        f"Test mode requires prod chat id: {_yes_no(checklist.get('test_mode_requires_telegram_prod_chat_id'))}",
+        f"Preview mode requires prod chat id: {_yes_no(checklist.get('preview_mode_requires_telegram_prod_chat_id'))}",
+        f"V3 preview formatting available: {_yes_no(checklist.get('v3_preview_format_available_without_prod_rollout'))}",
+        f"Overall readiness: {'ready' if checklist.get('ready') else 'not ready'}",
+    ]
+    errors = checklist.get("errors") or []
+    if errors:
+        lines.append("Errors:")
+        lines.extend(f"- {error}" for error in errors)
+    return "\n".join(lines)
 
 
 def run_scan() -> None:
@@ -52,9 +78,14 @@ def run_scan() -> None:
 def main() -> None:
     """
     Entry point.
+      --telegram-rollout-check : print Telegram rollout dry-run checklist.
       --run-now : execute once and exit.
       default   : schedule daily at SCHEDULE_HOUR:SCHEDULE_MINUTE (TIMEZONE).
     """
+    if "--telegram-rollout-check" in sys.argv:
+        print(format_telegram_rollout_checklist(build_telegram_rollout_dry_run_checklist()))
+        return
+
     if "--run-now" in sys.argv:
         logger.info("[Bot] --run-now flag detected, executing immediately")
         run_scan()

@@ -1,5 +1,6 @@
 import os
 import sys
+import copy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -199,6 +200,86 @@ def test_run_v2_scan_dry_run_skips_v2_report_and_generates_v3_decisions(monkeypa
     assert all(sample["decision"] for sample in result["v3_sample_decisions"])
 
 
+def test_v3_decision_blockers_are_derived_from_existing_decision_fields():
+    selected = [
+        {
+            "ticker": "ENTER",
+            "grade": "A",
+            "v3_decision": {
+                "decision": "ENTER",
+                "risk_flags": ["WIDE_STOP"],
+                "risk_warnings": ["stop distance is wide (9.0%)"],
+            },
+        },
+        {
+            "ticker": "WAIT",
+            "grade": "A",
+            "v3_decision": {
+                "decision": "WAIT",
+                "main_reason": "Setup quality is strong, but current stop distance is too wide for entry.",
+                "risk_flags": ["WIDE_STOP"],
+                "risk_warnings": [
+                    "stop distance is wide (12.0%)",
+                ],
+                "threshold_result": {"blocked_no_volume_confirmation": True},
+            },
+        },
+        {
+            "ticker": "BONLY",
+            "grade": "B",
+            "v3_decision": {
+                "decision": "WATCHLIST_ONLY",
+                "main_reason": "Setup is promising but not actionable yet.",
+                "risk_flags": [],
+                "risk_warnings": [],
+            },
+        },
+        {
+            "ticker": "EXCESS",
+            "grade": "A",
+            "v3_decision": {
+                "decision": "AVOID",
+                "main_reason": "Stop distance is too wide for the V3 risk rules.",
+                "risk_flags": ["WIDE_STOP"],
+                "risk_warnings": ["stop distance is excessive (22.0%)"],
+            },
+        },
+        {
+            "ticker": "SETUP",
+            "grade": "A",
+            "v3_decision": {
+                "decision": "AVOID",
+                "main_reason": "Signal does not show an actual or near breakout state.",
+                "risk_flags": ["GENERIC_SETUP_EVIDENCE"],
+                "risk_warnings": ["breakout state is not confirmed"],
+            },
+        },
+        {
+            "ticker": "OTHER",
+            "grade": "A",
+            "v3_decision": {
+                "decision": "WAIT",
+                "main_reason": "Operator review needed.",
+                "risk_flags": [],
+                "risk_warnings": [],
+            },
+        },
+    ]
+    before = copy.deepcopy(selected)
+
+    blockers = v2_engine._v3_decision_blockers(selected[:1], selected[1:])
+
+    assert selected == before
+    assert blockers == {
+        "stop_distance_wide": 1,
+        "stop_distance_excessive": 1,
+        "volume_confirmation_light": 1,
+        "b_grade_not_actionable": 1,
+        "missing_setup_confirmation": 1,
+        "other": 1,
+    }
+
+
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):
     _patch_liquidity_reject_scan(monkeypatch)
 
@@ -298,6 +379,14 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
                 "AVOID": 0,
                 "none": 0,
             },
+            "v3_blockers": {
+                "stop_distance_wide": 1,
+                "stop_distance_excessive": 0,
+                "volume_confirmation_light": 0,
+                "b_grade_not_actionable": 1,
+                "missing_setup_confirmation": 0,
+                "other": 0,
+            },
             "v3_sample_decisions": [
                 {
                     "ticker": "AAA",
@@ -345,5 +434,8 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
     assert "Reject aggregation:" in output
     assert "rejected_by_breakout_or_near_breakout: 2" in output
     assert "V3 decisions: ENTER: 1 | WAIT: 0 | WATCHLIST_ONLY: 1 | AVOID: 0 | none: 0" in output
+    assert "V3 blockers:" in output
+    assert "- stop_distance_wide: 1" in output
+    assert "- b_grade_not_actionable: 1" in output
     assert "AAA | A | ENTER | HIGH" in output
     assert v2_engine.ENABLE_V3_DECISION_LAYER is False

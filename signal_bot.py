@@ -76,6 +76,12 @@ def _format_key_counts(values: dict | None, limit: int | None = None) -> str:
     return " | ".join(f"{key}: {value}" for key, value in items)
 
 
+def _format_v3_blockers(values: dict | None) -> list[str]:
+    if not values:
+        return ["- none: 0"]
+    return [f"- {key}: {values.get(key, 0)}" for key in values]
+
+
 def format_v3_dry_run_review(result: dict) -> str:
     """Format a compact V3 dry-run review without exposing credentials."""
     lines = [
@@ -93,6 +99,8 @@ def format_v3_dry_run_review(result: dict) -> str:
         f"V3 decisions: {_format_decision_counts(result.get('v3_decision_counts') or {})}",
         f"Telegram delivery: {'skipped' if result.get('telegram_skipped') else 'enabled'}",
         f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",
+        "V3 blockers:",
+        *_format_v3_blockers(result.get("v3_blockers")),
     ]
 
     samples = result.get("v3_sample_decisions") or []

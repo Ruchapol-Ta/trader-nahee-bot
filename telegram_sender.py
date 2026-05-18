@@ -29,14 +29,62 @@ logger = logging.getLogger(__name__)
 _TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
+def _target_mode() -> str:
+    return (os.environ.get("TELEGRAM_TARGET_MODE") or "").strip().lower()
+
+
+def check_limited_live_rollout_readiness() -> dict:
+    """Validate Telegram routing prerequisites without sending anything."""
+    target_mode = _target_mode()
+    errors: list[str] = []
+
+    if target_mode == "prod":
+        if not os.environ.get("TELEGRAM_BOT_TOKEN"):
+            errors.append("TELEGRAM_BOT_TOKEN is required for prod target mode")
+        if not os.environ.get("TELEGRAM_PROD_CHAT_ID"):
+            errors.append(
+                "TELEGRAM_PROD_CHAT_ID is required when TELEGRAM_TARGET_MODE=prod; "
+                "TELEGRAM_CHAT_ID is not used as fallback"
+            )
+        return {
+            "ready": not errors,
+            "target_mode": target_mode,
+            "is_live_rollout": True,
+            "errors": errors,
+        }
+
+    if target_mode in {"test", "preview"}:
+        return {
+            "ready": True,
+            "target_mode": target_mode,
+            "is_live_rollout": False,
+            "errors": [],
+        }
+
+    if target_mode:
+        return {
+            "ready": False,
+            "target_mode": target_mode,
+            "is_live_rollout": False,
+            "errors": ["TELEGRAM_TARGET_MODE must be 'test', 'preview', or 'prod'"],
+        }
+
+    return {
+        "ready": False,
+        "target_mode": "",
+        "is_live_rollout": False,
+        "errors": ["TELEGRAM_TARGET_MODE=prod is required for limited live rollout"],
+    }
+
+
 def _get_credentials() -> tuple[str | None, str | None]:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    target_mode = (os.environ.get("TELEGRAM_TARGET_MODE") or "").strip().lower()
+    target_mode = _target_mode()
 
-    if target_mode == "test":
+    if target_mode in {"test", "preview"}:
         return token, os.environ.get("TELEGRAM_TEST_CHAT_ID")
     if target_mode == "prod":
-        return token, os.environ.get("TELEGRAM_PROD_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
+        return token, os.environ.get("TELEGRAM_PROD_CHAT_ID")
     if target_mode:
         return token, None
 
@@ -44,13 +92,13 @@ def _get_credentials() -> tuple[str | None, str | None]:
 
 
 def _missing_credentials_message() -> str:
-    target_mode = (os.environ.get("TELEGRAM_TARGET_MODE") or "").strip().lower()
-    if target_mode == "test":
-        return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_TEST_CHAT_ID for test target mode"
+    target_mode = _target_mode()
+    if target_mode in {"test", "preview"}:
+        return f"[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_TEST_CHAT_ID for {target_mode} target mode"
     if target_mode == "prod":
-        return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_PROD_CHAT_ID/TELEGRAM_CHAT_ID for prod target mode"
+        return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_PROD_CHAT_ID for prod target mode"
     if target_mode:
-        return "[Telegram] TELEGRAM_TARGET_MODE must be 'test' or 'prod'"
+        return "[Telegram] TELEGRAM_TARGET_MODE must be 'test', 'preview', or 'prod'"
     return "[Telegram] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env"
 
 

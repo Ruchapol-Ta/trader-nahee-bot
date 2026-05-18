@@ -31,6 +31,7 @@ from universe import get_v2_universe
 from position_sizing import calculate_signal_position_size
 
 logger = logging.getLogger(__name__)
+_V3_DECISION_ORDER = ("ENTER", "WAIT", "WATCHLIST_ONLY", "AVOID")
 
 
 def _new_diagnostics(scanned: int = 0) -> dict:
@@ -312,6 +313,49 @@ def _log_v3_shadow_summary(trade_signals: list[dict], watchlist: list[dict]) -> 
     )
 
 
+def _v3_decision_counts(trade_signals: list[dict], watchlist: list[dict]) -> dict:
+    """Count V3 decisions across selected V2 signals for dry-run review."""
+    counts = {decision: 0 for decision in _V3_DECISION_ORDER}
+    counts["none"] = 0
+    for item in [*trade_signals, *watchlist]:
+        decision = item.get("v3_decision")
+        if isinstance(decision, dict) and decision.get("decision"):
+            key = str(decision["decision"])
+            counts[key] = counts.get(key, 0) + 1
+        else:
+            counts["none"] += 1
+    return counts
+
+
+def _v3_sample_decisions(
+    trade_signals: list[dict],
+    watchlist: list[dict],
+    limit: int = 5,
+) -> list[dict]:
+    """Return compact non-secret decision samples for operator review."""
+    samples: list[dict] = []
+    selected = [
+        *[("trade_alert", signal) for signal in trade_signals],
+        *[("watchlist", signal) for signal in watchlist],
+    ]
+    for delivery_type, signal in selected[:limit]:
+        decision = signal.get("v3_decision")
+        decision_data = decision if isinstance(decision, dict) else {}
+        samples.append({
+            "ticker": signal.get("ticker"),
+            "delivery_type": delivery_type,
+            "grade": signal.get("grade"),
+            "score": signal.get("score"),
+            "decision": decision_data.get("decision"),
+            "confidence": decision_data.get("confidence"),
+            "main_reason": decision_data.get("main_reason"),
+            "supporting_reasons": (decision_data.get("supporting_reasons") or [])[:2],
+            "risk_warnings": (decision_data.get("risk_warnings") or [])[:2],
+            "v3_error": signal.get("v3_error"),
+        })
+    return samples
+
+
 def qualify_snapshot(
     data: dict,
     market_regime: dict,
@@ -405,7 +449,11 @@ def qualify_snapshot(
         return None
 
 
-def run_v2_scan(debug: bool = False) -> dict:
+def run_v2_scan(
+    debug: bool = False,
+    send_telegram: bool = True,
+    write_journal: bool = True,
+) -> dict:
     """Run the full V2 EOD scan with the market hard gate first."""
     try:
         logger.info("[V2] Starting Trade Qualification Engine scan")
@@ -415,14 +463,24 @@ def run_v2_scan(debug: bool = False) -> dict:
                 "[V2] Market regime invalid; skipping universe load and stock scan: "
                 + "; ".join(market_regime.get("invalid_reasons", []))
             )
-            sent = send_v2_market_summary(market_regime)
+            if send_telegram:
+                sent = send_v2_market_summary(market_regime)
+            else:
+                sent = 0
+                logger.info("[V2] Telegram market summary skipped for dry-run review")
             return {
                 "market_regime_valid": False,
+                "market_regime": market_regime.get("summary", "Unknown"),
                 "messages_sent": sent,
+                "telegram_skipped": not send_telegram,
                 "scanned": 0,
                 "liquidity_passed": 0,
                 "setup_passed": 0,
                 "grades": {},
+                "trade_signals": 0,
+                "watchlist": 0,
+                "v3_decision_counts": _v3_decision_counts([], []),
+                "v3_sample_decisions": [],
             }
 
         tickers = get_v2_universe()
@@ -498,12 +556,14 @@ def run_v2_scan(debug: bool = False) -> dict:
             "near_misses": near_misses,
             "top_candidates": top_candidates,
         }
+        v3_decision_counts = _v3_decision_counts(trade_signals, watchlist)
+        v3_sample_decisions = _v3_sample_decisions(trade_signals, watchlist)
         logger.info(
             f"[V2] Scanned={stats['scanned']} liquidity={liquidity_passed} "
             f"setups={setup_passed} grades={dict(grades)}"
         )
         _log_diagnostics(diagnostics, debug)
-        if ENABLE_SIGNAL_JOURNAL:
+        if ENABLE_SIGNAL_JOURNAL and write_journal:
             run_id = str(uuid4())
             written = journal_signals(trade_signals, watchlist, run_id=run_id)
             logger.info(f"[V3] Journaled {written} selected signals run_id={run_id}")
@@ -518,13 +578,21 @@ def run_v2_scan(debug: bool = False) -> dict:
                 logger.info(f"[V3] Journaled run summary run_id={run_id}")
         if ENABLE_V3_DECISION_LAYER:
             _log_v3_shadow_summary(trade_signals, watchlist)
-        sent = send_v2_report(market_regime, trade_signals, watchlist, stats)
+        if send_telegram:
+            sent = send_v2_report(market_regime, trade_signals, watchlist, stats)
+        else:
+            sent = 0
+            logger.info("[V2] Telegram report skipped for dry-run review")
         return {
             "market_regime_valid": True,
+            "market_regime": market_regime.get("summary", "Unknown"),
             "messages_sent": sent,
+            "telegram_skipped": not send_telegram,
             "funnel": stats["funnel"],
             "reject_reasons": stats["reject_reasons"],
             "near_misses": near_misses,
+            "v3_decision_counts": v3_decision_counts,
+            "v3_sample_decisions": v3_sample_decisions,
             **stats,
         }
     except Exception as e:

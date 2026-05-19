@@ -491,7 +491,7 @@ def _v3_selected_review(trade_signals: list[dict], watchlist: list[dict]) -> lis
 def _v3_sample_decisions(
     trade_signals: list[dict],
     watchlist: list[dict],
-    limit: int = 5,
+    limit: int = 3,
 ) -> list[dict]:
     """Return compact non-secret decision samples for operator review."""
     samples: list[dict] = []

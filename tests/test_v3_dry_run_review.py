@@ -317,10 +317,12 @@ def test_v3_selected_review_includes_all_selected_rows_and_compact_fields():
     before = copy.deepcopy((trade_signals, watchlist))
 
     review = v2_engine._v3_selected_review(trade_signals, watchlist)
+    detailed_examples = v2_engine._v3_sample_decisions(trade_signals, watchlist)
 
     assert (trade_signals, watchlist) == before
     assert v2_engine._v3_decision_counts(trade_signals, watchlist) == counts_before
     assert [row["ticker"] for row in review] == ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX"]
+    assert [sample["ticker"] for sample in detailed_examples] == ["ONE", "TWO", "THREE"]
     assert [row["delivery_type"] for row in review] == [
         "trade_alert",
         "trade_alert",
@@ -405,7 +407,8 @@ def test_format_v3_dry_run_review_prints_full_selected_review_beyond_samples():
         assert f"- SEL{i} |" in output
     assert "- SEL0 | A | WAIT | MEDIUM | score 85 | stop 10.0% | vol 0.80x | wide_stop, light_volume" in output
     assert "- SEL5 | B | WATCHLIST_ONLY | MEDIUM | score 80 | stop 10.5% | vol 0.85x | b_grade" in output
-    assert "Sample decisions:" in output
+    assert "Detailed examples:" in output
+    assert "Sample decisions:" not in output
 
 
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):
@@ -596,5 +599,7 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
     assert "Selected V3 review:" in output
     assert "- AAA | A | ENTER | HIGH | score 82 | stop 4.5% | vol 1.25x | none" in output
     assert "- WATCH | B | WATCHLIST_ONLY | MEDIUM | score 70 | stop 9.1% | vol 0.48x | wide_stop, light_volume" in output
+    assert "Detailed examples:" in output
+    assert "Sample decisions:" not in output
     assert "AAA | A | ENTER | HIGH" in output
     assert v2_engine.ENABLE_V3_DECISION_LAYER is False

@@ -22,6 +22,7 @@ from config import (
 )
 from logging_config import setup_logging
 from telegram_sender import build_telegram_rollout_dry_run_checklist, send_error_alert
+import v2_engine as v2_runtime
 from v2_engine import run_v2_scan
 
 setup_logging()
@@ -54,6 +55,146 @@ def format_telegram_rollout_checklist(checklist: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_decision_counts(counts: dict) -> str:
+    ordered = ["ENTER", "WAIT", "WATCHLIST_ONLY", "AVOID", "none"]
+    return " | ".join(f"{key}: {counts.get(key, 0)}" for key in ordered)
+
+
+def _format_key_counts(values: dict | None, limit: int | None = None) -> str:
+    if not values:
+        return "none"
+    items = [
+        (str(key), value)
+        for key, value in values.items()
+        if value not in (None, 0, {}, [])
+    ]
+    if not items:
+        return "none"
+    items.sort(key=lambda item: (-int(item[1]) if isinstance(item[1], int) else 0, item[0]))
+    if limit is not None:
+        items = items[:limit]
+    return " | ".join(f"{key}: {value}" for key, value in items)
+
+
+def _format_v3_blockers(values: dict | None) -> list[str]:
+    if not values:
+        return ["- none: 0"]
+    return [f"- {key}: {values.get(key, 0)}" for key in values]
+
+
+def _format_score(value: object) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def _format_pct(value: object) -> str:
+    try:
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_ratio(value: object) -> str:
+    try:
+        return f"{float(value):.2f}x"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
+    if not rows:
+        return ["- none"]
+    lines = []
+    for row in rows:
+        blockers = ", ".join(str(item) for item in row.get("blockers") or ["none"])
+        line = (
+            f"- {row.get('ticker') or 'UNKNOWN'} | "
+            f"{row.get('grade') or 'n/a'} | "
+            f"{row.get('decision') or 'none'} | "
+            f"{row.get('confidence') or 'n/a'} | "
+            f"score {_format_score(row.get('score'))} | "
+            f"stop {_format_pct(row.get('stop_distance_pct'))} | "
+            f"vol {_format_ratio(row.get('volume_ratio'))} | "
+            f"{blockers}"
+        )
+        if row.get("v3_error"):
+            line += f" | V3 error: {row.get('v3_error')}"
+        lines.append(line)
+    return lines
+
+
+def format_v3_dry_run_review(result: dict) -> str:
+    """Format a compact V3 dry-run review without exposing credentials."""
+    lines = [
+        "V3 Dry Run Review",
+        f"Market regime: {result.get('market_regime') or 'Unknown'}",
+        f"Market valid: {_yes_no(result.get('market_regime_valid'))}",
+        f"Scanned: {result.get('scanned', 0)}",
+        (
+            "Selected: "
+            f"{result.get('trade_signals', 0)} trade alerts | "
+            f"{result.get('watchlist', 0)} watchlist"
+        ),
+        f"V2 funnel: {_format_key_counts(result.get('funnel'))}",
+        f"Reject aggregation: {_format_key_counts(result.get('reject_reasons'), limit=5)}",
+        f"V3 decisions: {_format_decision_counts(result.get('v3_decision_counts') or {})}",
+        f"Telegram delivery: {'skipped' if result.get('telegram_skipped') else 'enabled'}",
+        f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",
+        "V3 blockers:",
+        *_format_v3_blockers(result.get("v3_blockers")),
+        "Selected V3 review:",
+        *_format_selected_v3_review(result.get("v3_selected_review")),
+    ]
+
+    samples = result.get("v3_sample_decisions") or []
+    if samples:
+        lines.append("Sample decisions:")
+        for sample in samples:
+            line = (
+                f"- {sample.get('ticker') or 'UNKNOWN'} | "
+                f"{sample.get('grade') or 'n/a'} | "
+                f"{sample.get('decision') or 'none'} | "
+                f"{sample.get('confidence') or 'n/a'}"
+            )
+            reason = sample.get("main_reason")
+            if reason:
+                line += f" | {reason}"
+            if sample.get("v3_error"):
+                line += f" | V3 error: {sample.get('v3_error')}"
+            lines.append(line)
+            supporting = sample.get("supporting_reasons") or []
+            if supporting:
+                lines.append("  Reasons: " + "; ".join(str(item) for item in supporting[:2]))
+            warnings = sample.get("risk_warnings") or []
+            if warnings:
+                lines.append("  Warnings: " + "; ".join(str(item) for item in warnings[:2]))
+    else:
+        lines.append("Sample decisions: none")
+
+    return "\n".join(lines)
+
+
+def run_v3_dry_run_review() -> dict:
+    """Run scan logic with V3 decisions enabled and Telegram delivery disabled."""
+    previous_decision_layer = v2_runtime.ENABLE_V3_DECISION_LAYER
+    try:
+        v2_runtime.ENABLE_V3_DECISION_LAYER = True
+        return run_v2_scan(
+            debug="--debug-v2" in sys.argv,
+            send_telegram=False,
+            write_journal=False,
+            log_rejects=False,
+            log_relative_strength=False,
+            fetch_liquidity_metadata=False,
+            log_liquidity_metadata_warnings=False,
+        )
+    finally:
+        v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer
+
+
 def run_scan() -> None:
     """Run the full EOD pipeline. Any failure is surfaced via Telegram."""
     start = datetime.now()
@@ -79,11 +220,16 @@ def main() -> None:
     """
     Entry point.
       --telegram-rollout-check : print Telegram rollout dry-run checklist.
+      --v3-dry-run-review : run scan review with V3 decisions and no Telegram.
       --run-now : execute once and exit.
       default   : schedule daily at SCHEDULE_HOUR:SCHEDULE_MINUTE (TIMEZONE).
     """
     if "--telegram-rollout-check" in sys.argv:
         print(format_telegram_rollout_checklist(build_telegram_rollout_dry_run_checklist()))
+        return
+
+    if "--v3-dry-run-review" in sys.argv:
+        print(format_v3_dry_run_review(run_v3_dry_run_review()))
         return
 
     if "--run-now" in sys.argv:

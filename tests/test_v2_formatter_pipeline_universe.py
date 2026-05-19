@@ -160,7 +160,7 @@ def test_invalid_market_regime_stops_before_universe_or_stock_scanning(monkeypat
 
 
 def test_failed_breakout_or_near_breakout_cannot_be_rescued_by_high_score(monkeypatch):
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
 
     result = v2_engine.qualify_snapshot(
         _candidate_row(close=96.0, pivot=100.0),
@@ -186,7 +186,7 @@ def test_near_breakout_candidate_is_b_watchlist_only(monkeypatch):
         "screen_universe",
         lambda tickers: [_candidate_row(ticker="NEAR", close=98.8, high=99.0, pivot=100.0)],
     )
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
 
     def fake_report(market_regime, trade_signals, watchlist, stats):
         captured["trade_signals"] = trade_signals
@@ -214,7 +214,7 @@ def test_actual_breakout_can_become_trade_alert_when_score_is_high(monkeypatch):
     )
     monkeypatch.setattr(v2_engine, "get_v2_universe", lambda: ["BO"])
     monkeypatch.setattr(v2_engine, "screen_universe", lambda tickers: [_candidate_row(ticker="BO")])
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
 
     def fake_report(market_regime, trade_signals, watchlist, stats):
         captured["trade_signals"] = trade_signals
@@ -232,7 +232,7 @@ def test_actual_breakout_can_become_trade_alert_when_score_is_high(monkeypatch):
 
 
 def test_valid_lower_quality_setup_becomes_b_watchlist_candidate(monkeypatch):
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
 
     result = v2_engine.qualify_snapshot(
         _candidate_row(
@@ -351,7 +351,7 @@ def test_v2_scan_reports_filter_funnel_and_reject_aggregation(monkeypatch):
             _candidate_row(ticker="HIGH", high_52w=120.0),
         ],
     )
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
 
     def fake_report(market_regime, trade_signals, watchlist, stats):
         captured["stats"] = stats
@@ -395,7 +395,7 @@ def test_debug_mode_collects_top_near_miss_candidates(monkeypatch):
             return_20d=3.0,
         )],
     )
-    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data: data)
+    monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
     monkeypatch.setattr(v2_engine, "send_v2_report", lambda *args: 1)
 
     result = v2_engine.run_v2_scan(debug=True)

@@ -82,6 +82,50 @@ def _format_v3_blockers(values: dict | None) -> list[str]:
     return [f"- {key}: {values.get(key, 0)}" for key in values]
 
 
+def _format_score(value: object) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def _format_pct(value: object) -> str:
+    try:
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_ratio(value: object) -> str:
+    try:
+        return f"{float(value):.2f}x"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
+    if not rows:
+        return ["- none"]
+    lines = []
+    for row in rows:
+        blockers = ", ".join(str(item) for item in row.get("blockers") or ["none"])
+        line = (
+            f"- {row.get('ticker') or 'UNKNOWN'} | "
+            f"{row.get('grade') or 'n/a'} | "
+            f"{row.get('decision') or 'none'} | "
+            f"{row.get('confidence') or 'n/a'} | "
+            f"score {_format_score(row.get('score'))} | "
+            f"stop {_format_pct(row.get('stop_distance_pct'))} | "
+            f"vol {_format_ratio(row.get('volume_ratio'))} | "
+            f"{blockers}"
+        )
+        if row.get("v3_error"):
+            line += f" | V3 error: {row.get('v3_error')}"
+        lines.append(line)
+    return lines
+
+
 def format_v3_dry_run_review(result: dict) -> str:
     """Format a compact V3 dry-run review without exposing credentials."""
     lines = [
@@ -101,6 +145,8 @@ def format_v3_dry_run_review(result: dict) -> str:
         f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",
         "V3 blockers:",
         *_format_v3_blockers(result.get("v3_blockers")),
+        "Selected V3 review:",
+        *_format_selected_v3_review(result.get("v3_selected_review")),
     ]
 
     samples = result.get("v3_sample_decisions") or []

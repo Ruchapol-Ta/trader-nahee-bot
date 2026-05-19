@@ -284,6 +284,130 @@ def test_v3_decision_blockers_are_derived_from_existing_decision_fields():
     }
 
 
+def test_v3_selected_review_includes_all_selected_rows_and_compact_fields():
+    def selected_signal(ticker, grade, score, decision, confidence, stop_pct, volume_ratio, **decision_overrides):
+        v3_decision = {
+            "decision": decision,
+            "confidence": confidence,
+            "decision_stop_distance_pct": stop_pct,
+            "risk_flags": decision_overrides.pop("risk_flags", []),
+            "risk_warnings": decision_overrides.pop("risk_warnings", []),
+        }
+        v3_decision.update(decision_overrides)
+        return {
+            "ticker": ticker,
+            "grade": grade,
+            "score": score,
+            "volume": volume_ratio * 100.0,
+            "avg_volume": 100.0,
+            "v3_decision": v3_decision,
+        }
+
+    trade_signals = [
+        selected_signal("ONE", "A", 85, "WAIT", "MEDIUM", 0.101, 0.81, risk_flags=["WIDE_STOP"]),
+        selected_signal("TWO", "A", 82, "WAIT", "MEDIUM", 0.092, 0.60, risk_flags=["NO_VOLUME_CONFIRMATION"]),
+    ]
+    watchlist = [
+        selected_signal("THREE", "B", 74, "WATCHLIST_ONLY", "MEDIUM", 0.091, 0.48),
+        selected_signal("FOUR", "A", 80, "AVOID", "LOW", 0.22, 1.10, risk_warnings=["stop distance is excessive (22.0%)"]),
+        selected_signal("FIVE", "A", 78, "AVOID", "LOW", 0.05, 1.20, risk_flags=["GENERIC_SETUP_EVIDENCE"]),
+        selected_signal("SIX", "A", 77, "WAIT", "MEDIUM", 0.06, 1.30),
+    ]
+    counts_before = v2_engine._v3_decision_counts(trade_signals, watchlist)
+    before = copy.deepcopy((trade_signals, watchlist))
+
+    review = v2_engine._v3_selected_review(trade_signals, watchlist)
+
+    assert (trade_signals, watchlist) == before
+    assert v2_engine._v3_decision_counts(trade_signals, watchlist) == counts_before
+    assert [row["ticker"] for row in review] == ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX"]
+    assert [row["delivery_type"] for row in review] == [
+        "trade_alert",
+        "trade_alert",
+        "watchlist",
+        "watchlist",
+        "watchlist",
+        "watchlist",
+    ]
+    assert review[0] == {
+        "ticker": "ONE",
+        "delivery_type": "trade_alert",
+        "grade": "A",
+        "score": 85,
+        "decision": "WAIT",
+        "confidence": "MEDIUM",
+        "stop_distance_pct": 0.101,
+        "volume_ratio": 0.81,
+        "blockers": ["wide_stop"],
+        "v3_error": None,
+    }
+    assert review[1]["blockers"] == ["light_volume"]
+    assert review[2]["blockers"] == ["b_grade"]
+    assert review[3]["blockers"] == ["excessive_stop"]
+    assert review[4]["blockers"] == ["missing_setup"]
+    assert review[5]["blockers"] == ["other"]
+
+
+def test_format_v3_dry_run_review_prints_full_selected_review_beyond_samples():
+    selected_review = [
+        {
+            "ticker": f"SEL{i}",
+            "grade": "A" if i < 3 else "B",
+            "score": 85 - i,
+            "decision": "WAIT" if i < 5 else "WATCHLIST_ONLY",
+            "confidence": "MEDIUM",
+            "stop_distance_pct": 0.10 + (i / 1000),
+            "volume_ratio": 0.80 + (i / 100),
+            "blockers": ["wide_stop", "light_volume"] if i == 0 else ["b_grade"],
+        }
+        for i in range(6)
+    ]
+    output = signal_bot.format_v3_dry_run_review({
+        "market_regime": "Bullish market regime",
+        "market_regime_valid": True,
+        "scanned": 6,
+        "trade_signals": 2,
+        "watchlist": 4,
+        "funnel": {"scanned": 6, "final_setup_passed": 6},
+        "reject_reasons": {},
+        "v3_decision_counts": {
+            "ENTER": 0,
+            "WAIT": 5,
+            "WATCHLIST_ONLY": 1,
+            "AVOID": 0,
+            "none": 0,
+        },
+        "telegram_skipped": True,
+        "journal_skipped": True,
+        "v3_blockers": {
+            "stop_distance_wide": 1,
+            "stop_distance_excessive": 0,
+            "volume_confirmation_light": 1,
+            "b_grade_not_actionable": 5,
+            "missing_setup_confirmation": 0,
+            "other": 0,
+        },
+        "v3_selected_review": selected_review,
+        "v3_sample_decisions": [
+            {
+                "ticker": "SEL0",
+                "grade": "A",
+                "decision": "WAIT",
+                "confidence": "MEDIUM",
+                "main_reason": "Sample only.",
+            }
+        ],
+    })
+
+    assert "V3 decisions: ENTER: 0 | WAIT: 5 | WATCHLIST_ONLY: 1 | AVOID: 0 | none: 0" in output
+    assert "Selected V3 review:" in output
+    for i in range(6):
+        assert f"- SEL{i} |" in output
+    assert "- SEL0 | A | WAIT | MEDIUM | score 85 | stop 10.0% | vol 0.80x | wide_stop, light_volume" in output
+    assert "- SEL5 | B | WATCHLIST_ONLY | MEDIUM | score 80 | stop 10.5% | vol 0.85x | b_grade" in output
+    assert "Sample decisions:" in output
+
+
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):
     _patch_liquidity_reject_scan(monkeypatch)
 
@@ -395,6 +519,30 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
                 "missing_setup_confirmation": 0,
                 "other": 0,
             },
+            "v3_selected_review": [
+                {
+                    "ticker": "AAA",
+                    "delivery_type": "trade_alert",
+                    "grade": "A",
+                    "score": 82,
+                    "decision": "ENTER",
+                    "confidence": "HIGH",
+                    "stop_distance_pct": 0.045,
+                    "volume_ratio": 1.25,
+                    "blockers": [],
+                },
+                {
+                    "ticker": "WATCH",
+                    "delivery_type": "watchlist",
+                    "grade": "B",
+                    "score": 70,
+                    "decision": "WATCHLIST_ONLY",
+                    "confidence": "MEDIUM",
+                    "stop_distance_pct": 0.091,
+                    "volume_ratio": 0.48,
+                    "blockers": ["wide_stop", "light_volume"],
+                },
+            ],
             "v3_sample_decisions": [
                 {
                     "ticker": "AAA",
@@ -445,5 +593,8 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
     assert "V3 blockers:" in output
     assert "- stop_distance_wide: 1" in output
     assert "- b_grade_not_actionable: 1" in output
+    assert "Selected V3 review:" in output
+    assert "- AAA | A | ENTER | HIGH | score 82 | stop 4.5% | vol 1.25x | none" in output
+    assert "- WATCH | B | WATCHLIST_ONLY | MEDIUM | score 70 | stop 9.1% | vol 0.48x | wide_stop, light_volume" in output
     assert "AAA | A | ENTER | HIGH" in output
     assert v2_engine.ENABLE_V3_DECISION_LAYER is False

@@ -1,6 +1,7 @@
 # v2_engine.py - V2 Trade Qualification Engine orchestration.
 import copy
 import logging
+import math
 from collections import Counter
 from uuid import uuid4
 
@@ -40,6 +41,14 @@ _V3_BLOCKER_ORDER = (
     "missing_setup_confirmation",
     "other",
 )
+_V3_BLOCKER_LABELS = {
+    "stop_distance_wide": "wide_stop",
+    "stop_distance_excessive": "excessive_stop",
+    "volume_confirmation_light": "light_volume",
+    "b_grade_not_actionable": "b_grade",
+    "missing_setup_confirmation": "missing_setup",
+    "other": "other",
+}
 
 
 def _new_diagnostics(scanned: int = 0) -> dict:
@@ -350,68 +359,133 @@ def _v3_decision_text(decision: dict) -> str:
     return " ".join(str(part).lower() for part in parts if part)
 
 
+def _v3_decision_blocker_keys(signal: dict, decision: dict) -> list[str]:
+    """Return stable blocker buckets from existing V3 decision fields."""
+    if not isinstance(decision, dict) or not decision.get("decision"):
+        return ["other"]
+    if decision.get("decision") == "ENTER":
+        return []
+
+    flags = {str(flag).upper() for flag in decision.get("risk_flags") or []}
+    threshold = decision.get("threshold_result")
+    threshold = threshold if isinstance(threshold, dict) else {}
+    text = _v3_decision_text(decision)
+    matched = set()
+
+    stop_excessive = (
+        "stop distance is excessive" in text
+        or "stop distance exceeds" in text
+        or "exceeds v3 avoid limits" in text
+    )
+    if stop_excessive:
+        matched.add("stop_distance_excessive")
+
+    if not stop_excessive and (
+        "WIDE_STOP" in flags
+        or "STRUCTURAL_STOP_WIDE" in flags
+        or threshold.get("blocked_structural_stop_above_conservative_limit")
+        or "stop distance is wide" in text
+        or "stop distance is too wide" in text
+        or "wide stop" in text
+    ):
+        matched.add("stop_distance_wide")
+
+    if (
+        "NO_VOLUME_CONFIRMATION" in flags
+        or threshold.get("blocked_no_volume_confirmation")
+        or "volume confirmation" in text
+        or "light volume" in text
+    ):
+        matched.add("volume_confirmation_light")
+
+    if signal.get("grade") == "B" or "b-grade" in text or "not actionable" in text:
+        matched.add("b_grade_not_actionable")
+
+    if (
+        "GENERIC_SETUP_EVIDENCE" in flags
+        or "missing setup" in text
+        or "setup confirmation" in text
+        or "breakout state is not confirmed" in text
+        or "has not confirmed" in text
+        or "no actual or near-breakout" in text
+    ):
+        matched.add("missing_setup_confirmation")
+
+    if not matched:
+        matched.add("other")
+    return [bucket for bucket in _V3_BLOCKER_ORDER if bucket in matched]
+
+
 def _v3_decision_blockers(trade_signals: list[dict], watchlist: list[dict]) -> dict:
     """Aggregate existing V3 decision blockers without changing outcomes."""
     counts = {bucket: 0 for bucket in _V3_BLOCKER_ORDER}
     for signal in [*trade_signals, *watchlist]:
         decision = signal.get("v3_decision")
-        if not isinstance(decision, dict) or not decision.get("decision"):
-            counts["other"] += 1
-            continue
-        if decision.get("decision") == "ENTER":
-            continue
-
-        flags = {str(flag).upper() for flag in decision.get("risk_flags") or []}
-        threshold = decision.get("threshold_result")
-        threshold = threshold if isinstance(threshold, dict) else {}
-        text = _v3_decision_text(decision)
-        matched = set()
-
-        stop_excessive = (
-            "stop distance is excessive" in text
-            or "stop distance exceeds" in text
-            or "exceeds v3 avoid limits" in text
-        )
-        if stop_excessive:
-            matched.add("stop_distance_excessive")
-
-        if not stop_excessive and (
-            "WIDE_STOP" in flags
-            or "STRUCTURAL_STOP_WIDE" in flags
-            or threshold.get("blocked_structural_stop_above_conservative_limit")
-            or "stop distance is wide" in text
-            or "stop distance is too wide" in text
-            or "wide stop" in text
-        ):
-            matched.add("stop_distance_wide")
-
-        if (
-            "NO_VOLUME_CONFIRMATION" in flags
-            or threshold.get("blocked_no_volume_confirmation")
-            or "volume confirmation" in text
-            or "light volume" in text
-        ):
-            matched.add("volume_confirmation_light")
-
-        if signal.get("grade") == "B" or "b-grade" in text or "not actionable" in text:
-            matched.add("b_grade_not_actionable")
-
-        if (
-            "GENERIC_SETUP_EVIDENCE" in flags
-            or "missing setup" in text
-            or "setup confirmation" in text
-            or "breakout state is not confirmed" in text
-            or "has not confirmed" in text
-            or "no actual or near-breakout" in text
-        ):
-            matched.add("missing_setup_confirmation")
-
-        if matched:
-            for bucket in matched:
-                counts[bucket] += 1
-        else:
-            counts["other"] += 1
+        for bucket in _v3_decision_blocker_keys(signal, decision if isinstance(decision, dict) else {}):
+            counts[bucket] += 1
     return counts
+
+
+def _finite_number(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_ratio(numerator: object, denominator: object) -> float | None:
+    top = _finite_number(numerator)
+    bottom = _finite_number(denominator)
+    if top is None or bottom in (None, 0):
+        return None
+    return top / bottom
+
+
+def _selected_stop_distance(signal: dict, decision: dict) -> float | None:
+    stop_distance = _finite_number(decision.get("decision_stop_distance_pct"))
+    if stop_distance is not None:
+        return stop_distance
+    plan = signal.get("trade_plan")
+    plan = plan if isinstance(plan, dict) else {}
+    return (
+        _finite_number(plan.get("tactical_stop_distance_pct"))
+        or _finite_number(plan.get("structural_stop_distance_pct"))
+    )
+
+
+def _v3_selected_review(trade_signals: list[dict], watchlist: list[dict]) -> list[dict]:
+    """Return one compact V3 review row per selected V2 signal."""
+    rows: list[dict] = []
+    selected = [
+        *[("trade_alert", signal) for signal in trade_signals],
+        *[("watchlist", signal) for signal in watchlist],
+    ]
+    for delivery_type, signal in selected:
+        decision = signal.get("v3_decision")
+        decision_data = decision if isinstance(decision, dict) else {}
+        blockers = [
+            _V3_BLOCKER_LABELS[bucket]
+            for bucket in _v3_decision_blocker_keys(signal, decision_data)
+        ]
+        rows.append({
+            "ticker": signal.get("ticker"),
+            "delivery_type": delivery_type,
+            "grade": signal.get("grade"),
+            "score": signal.get("score"),
+            "decision": decision_data.get("decision"),
+            "confidence": decision_data.get("confidence"),
+            "stop_distance_pct": _selected_stop_distance(signal, decision_data),
+            "volume_ratio": _safe_ratio(
+                signal.get("volume"),
+                signal.get("avg_volume") or signal.get("vol_sma20"),
+            ),
+            "blockers": blockers,
+            "v3_error": signal.get("v3_error"),
+        })
+    return rows
 
 
 def _v3_sample_decisions(
@@ -599,6 +673,7 @@ def run_v2_scan(
                 "watchlist": 0,
                 "v3_decision_counts": _v3_decision_counts([], []),
                 "v3_blockers": _v3_decision_blockers([], []),
+                "v3_selected_review": _v3_selected_review([], []),
                 "v3_sample_decisions": [],
             }
 
@@ -685,6 +760,7 @@ def run_v2_scan(
         }
         v3_decision_counts = _v3_decision_counts(trade_signals, watchlist)
         v3_blockers = _v3_decision_blockers(trade_signals, watchlist)
+        v3_selected_review = _v3_selected_review(trade_signals, watchlist)
         v3_sample_decisions = _v3_sample_decisions(trade_signals, watchlist)
         logger.info(
             f"[V2] Scanned={stats['scanned']} liquidity={liquidity_passed} "
@@ -722,6 +798,7 @@ def run_v2_scan(
             "near_misses": near_misses,
             "v3_decision_counts": v3_decision_counts,
             "v3_blockers": v3_blockers,
+            "v3_selected_review": v3_selected_review,
             "v3_sample_decisions": v3_sample_decisions,
             **stats,
         }

@@ -27,7 +27,11 @@ def _finite_float(data: dict, key: str, default: float | None = None) -> float |
         return None
 
 
-def evaluate_liquidity(data: dict, check_market_cap: bool = True) -> dict:
+def evaluate_liquidity(
+    data: dict,
+    check_market_cap: bool = True,
+    log_market_cap_warning: bool = True,
+) -> dict:
     """Apply V2 liquidity rules and return pass/fail reasons."""
     try:
         ticker = data.get("ticker", "<unknown>")
@@ -57,7 +61,8 @@ def evaluate_liquidity(data: dict, check_market_cap: bool = True) -> dict:
         if not check_market_cap:
             reasons.append("market cap check deferred")
         elif market_cap is None:
-            logger.warning(f"[Liquidity] {ticker}: market cap unavailable")
+            if log_market_cap_warning:
+                logger.warning(f"[Liquidity] {ticker}: market cap unavailable")
             reasons.append("market cap unavailable")
         elif market_cap < V2_MIN_MARKET_CAP:
             reject_reasons.append(f"market cap < {V2_MIN_MARKET_CAP}")
@@ -81,7 +86,7 @@ def evaluate_liquidity(data: dict, check_market_cap: bool = True) -> dict:
         }
 
 
-def fetch_ticker_metadata(ticker: str) -> dict:
+def fetch_ticker_metadata(ticker: str, log_warnings: bool = True) -> dict:
     """Best-effort yfinance metadata lookup for market cap and sector."""
     try:
         info = yf.Ticker(ticker).info or {}
@@ -90,19 +95,29 @@ def fetch_ticker_metadata(ticker: str) -> dict:
             "sector": info.get("sector"),
         }
     except Exception as e:
-        logger.warning(f"[Liquidity] {ticker}: metadata fetch failed: {type(e).__name__}: {e}")
+        if log_warnings:
+            logger.warning(f"[Liquidity] {ticker}: metadata fetch failed: {type(e).__name__}: {e}")
         return {"market_cap": None, "sector": None}
 
 
-def enrich_with_market_metadata(data: dict) -> dict:
+def enrich_with_market_metadata(
+    data: dict,
+    fetch_metadata: bool = True,
+    log_warnings: bool = True,
+) -> dict:
     """Return a snapshot copy with optional yfinance market cap and sector fields."""
     try:
         ticker = str(data.get("ticker", ""))
-        metadata = fetch_ticker_metadata(ticker) if ticker else {"market_cap": None, "sector": None}
+        metadata = (
+            fetch_ticker_metadata(ticker, log_warnings=log_warnings)
+            if ticker and fetch_metadata
+            else {"market_cap": None, "sector": None}
+        )
         enriched = {**data}
         enriched.setdefault("market_cap", metadata.get("market_cap"))
         enriched.setdefault("sector", metadata.get("sector"))
         return enriched
     except Exception as e:
-        logger.error(f"[Liquidity] Metadata enrichment failed: {e}", exc_info=True)
+        if log_warnings:
+            logger.error(f"[Liquidity] Metadata enrichment failed: {e}", exc_info=True)
         return {**data, "market_cap": data.get("market_cap"), "sector": data.get("sector")}

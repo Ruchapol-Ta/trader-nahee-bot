@@ -452,11 +452,17 @@ def qualify_snapshot(
     debug: bool = False,
     log_rejects: bool = True,
     log_relative_strength: bool = True,
+    fetch_liquidity_metadata: bool = True,
+    log_liquidity_metadata_warnings: bool = True,
 ) -> dict | None:
     """Run one stock snapshot through V2 liquidity, RS, VCP, risk, and scoring."""
     try:
         ticker = data.get("ticker", "<unknown>")
-        basic_liquidity = evaluate_liquidity(data, check_market_cap=False)
+        basic_liquidity = evaluate_liquidity(
+            data,
+            check_market_cap=False,
+            log_market_cap_warning=log_liquidity_metadata_warnings,
+        )
         if not basic_liquidity["passed"]:
             _record_rejects(diagnostics, basic_liquidity["reject_reasons"])
             _record_rejected_candidate(diagnostics)
@@ -464,8 +470,15 @@ def qualify_snapshot(
                 _reject(ticker, basic_liquidity["reject_reasons"])
             return None
 
-        enriched = enrich_with_market_metadata(data)
-        liquidity = evaluate_liquidity(enriched)
+        enriched = enrich_with_market_metadata(
+            data,
+            fetch_metadata=fetch_liquidity_metadata,
+            log_warnings=log_liquidity_metadata_warnings,
+        )
+        liquidity = evaluate_liquidity(
+            enriched,
+            log_market_cap_warning=log_liquidity_metadata_warnings,
+        )
         if not liquidity["passed"]:
             _record_rejects(diagnostics, liquidity["reject_reasons"])
             _record_rejected_candidate(diagnostics)
@@ -553,6 +566,8 @@ def run_v2_scan(
     write_journal: bool = True,
     log_rejects: bool = True,
     log_relative_strength: bool = True,
+    fetch_liquidity_metadata: bool = True,
+    log_liquidity_metadata_warnings: bool = True,
 ) -> dict:
     """Run the full V2 EOD scan with the market hard gate first."""
     try:
@@ -598,7 +613,11 @@ def run_v2_scan(
         setup_passed = 0
 
         for snapshot in snapshots:
-            first_liquidity = evaluate_liquidity(snapshot, check_market_cap=False)
+            first_liquidity = evaluate_liquidity(
+                snapshot,
+                check_market_cap=False,
+                log_market_cap_warning=log_liquidity_metadata_warnings,
+            )
             if first_liquidity["passed"]:
                 liquidity_passed += 1
                 diagnostics["funnel"]["liquidity_passed"] += 1
@@ -611,6 +630,8 @@ def run_v2_scan(
                 debug=debug,
                 log_rejects=log_rejects,
                 log_relative_strength=log_relative_strength,
+                fetch_liquidity_metadata=fetch_liquidity_metadata,
+                log_liquidity_metadata_warnings=log_liquidity_metadata_warnings,
             )
             if candidate is not None:
                 setup_passed += 1

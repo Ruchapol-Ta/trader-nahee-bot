@@ -62,7 +62,7 @@ def _patch_scan_inputs(monkeypatch, qualified):
     monkeypatch.setattr(
         v2_engine,
         "evaluate_liquidity",
-        lambda snapshot, check_market_cap=False: {"passed": True, "reasons": []},
+        lambda snapshot, check_market_cap=False, **kwargs: {"passed": True, "reasons": []},
     )
     monkeypatch.setattr(
         v2_engine,
@@ -79,7 +79,7 @@ def _patch_liquidity_reject_scan(monkeypatch):
     monkeypatch.setattr(
         v2_engine,
         "evaluate_liquidity",
-        lambda snapshot, check_market_cap=False: {
+        lambda snapshot, check_market_cap=False, **kwargs: {
             "passed": False,
             "reasons": [],
             "reject_reasons": ["price < 10.00"],
@@ -127,14 +127,18 @@ def test_run_v2_scan_default_behavior_still_logs_relative_strength(monkeypatch):
     monkeypatch.setattr(v2_engine, "send_v2_report", lambda *args: 1)
 
     def fake_qualify(snapshot, market_regime, spy_return, qqq_return, **kwargs):
-        captured.append(kwargs.get("log_relative_strength"))
+        captured.append((
+            kwargs.get("log_relative_strength"),
+            kwargs.get("fetch_liquidity_metadata"),
+            kwargs.get("log_liquidity_metadata_warnings"),
+        ))
         return qualified[snapshot["ticker"]].copy()
 
     monkeypatch.setattr(v2_engine, "qualify_snapshot", fake_qualify)
 
     result = v2_engine.run_v2_scan()
 
-    assert captured == [True]
+    assert captured == [(True, True, True)]
     assert result["messages_sent"] == 1
 
 
@@ -347,12 +351,16 @@ def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch,
         write_journal=True,
         log_rejects=True,
         log_relative_strength=True,
+        fetch_liquidity_metadata=True,
+        log_liquidity_metadata_warnings=True,
     ):
         assert debug is False
         assert send_telegram is False
         assert write_journal is False
         assert log_rejects is False
         assert log_relative_strength is False
+        assert fetch_liquidity_metadata is False
+        assert log_liquidity_metadata_warnings is False
         assert v2_engine.ENABLE_V3_DECISION_LAYER is True
         return {
             "market_regime": "Bullish market regime",

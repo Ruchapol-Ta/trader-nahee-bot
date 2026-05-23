@@ -104,6 +104,17 @@ def _format_ratio(value: object) -> str:
         return "n/a"
 
 
+_WAIT_SUBTYPE_LABELS = {
+    "WAIT_VOLUME_CONFIRMATION": "wait_volume",
+    "WAIT_TIGHTER_STOP": "wait_stop",
+    "WAIT_TIGHTER_STOP_AND_VOLUME": "wait_stop+volume",
+}
+
+
+def _format_wait_subtype(value: object) -> str:
+    return _WAIT_SUBTYPE_LABELS.get(str(value), str(value))
+
+
 def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
     if not rows:
         return ["- none"]
@@ -120,6 +131,8 @@ def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
             f"vol {_format_ratio(row.get('volume_ratio'))} | "
             f"{blockers}"
         )
+        if row.get("decision_subtype"):
+            line += f" | subtype {_format_wait_subtype(row.get('decision_subtype'))}"
         if row.get("v3_error"):
             line += f" | V3 error: {row.get('v3_error')}"
         lines.append(line)

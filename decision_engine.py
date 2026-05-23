@@ -23,6 +23,10 @@ DECISION_WAIT = "WAIT"
 DECISION_WATCHLIST_ONLY = "WATCHLIST_ONLY"
 DECISION_AVOID = "AVOID"
 
+WAIT_VOLUME_CONFIRMATION = "WAIT_VOLUME_CONFIRMATION"
+WAIT_TIGHTER_STOP = "WAIT_TIGHTER_STOP"
+WAIT_TIGHTER_STOP_AND_VOLUME = "WAIT_TIGHTER_STOP_AND_VOLUME"
+
 CONFIDENCE_HIGH = "HIGH"
 CONFIDENCE_MEDIUM = "MEDIUM"
 CONFIDENCE_LOW = "LOW"
@@ -65,6 +69,7 @@ def _result(
     risk_profile: str | None = None,
     enter_max_stop_pct: float | None = None,
     threshold_result: dict | None = None,
+    decision_subtype: str | None = None,
 ) -> dict:
     if trade_risk_mode is None:
         trade_risk_mode = TRADE_RISK_NORMAL if decision == DECISION_ENTER else TRADE_RISK_NO_TRADE
@@ -97,6 +102,7 @@ def _result(
         "risk_profile": risk_profile,
         "enter_max_stop_pct": enter_max_stop_pct,
         "threshold_result": threshold_result or {},
+        "decision_subtype": decision_subtype,
     }
 
 
@@ -168,6 +174,23 @@ def _threshold_result(
         ),
         "blocked_extended_entry": bool(extension.get("mild") or extension.get("severe")),
     }
+
+
+def _wait_decision_subtype(
+    *,
+    stop_distance_pct: float | None,
+    enter_max_stop_pct: float,
+    volume_ratio: float | None,
+) -> str | None:
+    wide_stop = stop_distance_pct is not None and stop_distance_pct > enter_max_stop_pct
+    needs_volume = volume_ratio is None or volume_ratio < V3_ENTER_MIN_VOLUME_RATIO
+    if wide_stop and needs_volume:
+        return WAIT_TIGHTER_STOP_AND_VOLUME
+    if wide_stop:
+        return WAIT_TIGHTER_STOP
+    if needs_volume:
+        return WAIT_VOLUME_CONFIRMATION
+    return None
 
 
 def _enter_trade_risk_mode(risk_profile: str, stop_distance_pct: float | None) -> str:
@@ -620,6 +643,11 @@ def evaluate_signal_decision(
             invalidation=["Avoid if stop distance remains above V3 tracking limits."],
             sizing_mode=sizing_mode,
             sizing_input=sizing_input,
+            decision_subtype=_wait_decision_subtype(
+                stop_distance_pct=stop_distance_pct,
+                enter_max_stop_pct=enter_max_stop_pct,
+                volume_ratio=volume_ratio,
+            ),
             **result_plan_fields,
         )
 
@@ -784,6 +812,21 @@ def evaluate_signal_decision(
             **result_plan_fields,
         )
 
+    wait_subtype = None
+    if (
+        grade in {"A+", "A"}
+        and actual_breakout
+        and score >= V3_ENTER_MIN_SCORE
+        and stop_distance_pct is not None
+        and stop_distance_pct <= enter_max_stop_pct
+        and (volume_ratio is None or volume_ratio < V3_ENTER_MIN_VOLUME_RATIO)
+    ):
+        wait_subtype = _wait_decision_subtype(
+            stop_distance_pct=stop_distance_pct,
+            enter_max_stop_pct=enter_max_stop_pct,
+            volume_ratio=volume_ratio,
+        )
+
     return _result(
         DECISION_WAIT,
         CONFIDENCE_MEDIUM,
@@ -796,5 +839,6 @@ def evaluate_signal_decision(
         invalidation=["Avoid if V2 setup quality weakens or risk levels deteriorate."],
         sizing_mode=sizing_mode,
         sizing_input=sizing_input,
+        decision_subtype=wait_subtype,
         **result_plan_fields,
     )

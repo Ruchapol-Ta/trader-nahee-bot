@@ -288,6 +288,7 @@ def test_v3_selected_review_includes_all_selected_rows_and_compact_fields():
     def selected_signal(ticker, grade, score, decision, confidence, stop_pct, volume_ratio, **decision_overrides):
         v3_decision = {
             "decision": decision,
+            "decision_subtype": decision_overrides.pop("decision_subtype", None),
             "confidence": confidence,
             "decision_stop_distance_pct": stop_pct,
             "risk_flags": decision_overrides.pop("risk_flags", []),
@@ -304,7 +305,17 @@ def test_v3_selected_review_includes_all_selected_rows_and_compact_fields():
         }
 
     trade_signals = [
-        selected_signal("ONE", "A", 85, "WAIT", "MEDIUM", 0.101, 0.81, risk_flags=["WIDE_STOP"]),
+        selected_signal(
+            "ONE",
+            "A",
+            85,
+            "WAIT",
+            "MEDIUM",
+            0.101,
+            0.81,
+            decision_subtype="WAIT_TIGHTER_STOP_AND_VOLUME",
+            risk_flags=["WIDE_STOP"],
+        ),
         selected_signal("TWO", "A", 82, "WAIT", "MEDIUM", 0.092, 0.60, risk_flags=["NO_VOLUME_CONFIRMATION"]),
     ]
     watchlist = [
@@ -337,6 +348,7 @@ def test_v3_selected_review_includes_all_selected_rows_and_compact_fields():
         "grade": "A",
         "score": 85,
         "decision": "WAIT",
+        "decision_subtype": "WAIT_TIGHTER_STOP_AND_VOLUME",
         "confidence": "MEDIUM",
         "stop_distance_pct": 0.101,
         "volume_ratio": 0.81,
@@ -357,6 +369,7 @@ def test_format_v3_dry_run_review_prints_full_selected_review_beyond_samples():
             "grade": "A" if i < 3 else "B",
             "score": 85 - i,
             "decision": "WAIT" if i < 5 else "WATCHLIST_ONLY",
+            "decision_subtype": "WAIT_TIGHTER_STOP_AND_VOLUME" if i == 0 else None,
             "confidence": "MEDIUM",
             "stop_distance_pct": 0.10 + (i / 1000),
             "volume_ratio": 0.80 + (i / 100),
@@ -405,10 +418,61 @@ def test_format_v3_dry_run_review_prints_full_selected_review_beyond_samples():
     assert "Selected V3 review:" in output
     for i in range(6):
         assert f"- SEL{i} |" in output
-    assert "- SEL0 | A | WAIT | MEDIUM | score 85 | stop 10.0% | vol 0.80x | wide_stop, light_volume" in output
+    assert (
+        "- SEL0 | A | WAIT | MEDIUM | score 85 | stop 10.0% | vol 0.80x | "
+        "wide_stop, light_volume | subtype wait_stop+volume"
+    ) in output
     assert "- SEL5 | B | WATCHLIST_ONLY | MEDIUM | score 80 | stop 10.5% | vol 0.85x | b_grade" in output
     assert "Detailed examples:" in output
     assert "Sample decisions:" not in output
+
+
+def test_format_v3_dry_run_review_maps_wait_volume_subtype_label():
+    output = signal_bot.format_v3_dry_run_review({
+        "market_regime": "Bullish market regime",
+        "market_regime_valid": True,
+        "scanned": 1,
+        "trade_signals": 1,
+        "watchlist": 0,
+        "funnel": {"scanned": 1, "final_setup_passed": 1},
+        "reject_reasons": {},
+        "v3_decision_counts": {
+            "ENTER": 0,
+            "WAIT": 1,
+            "WATCHLIST_ONLY": 0,
+            "AVOID": 0,
+            "none": 0,
+        },
+        "telegram_skipped": True,
+        "journal_skipped": True,
+        "v3_blockers": {
+            "stop_distance_wide": 0,
+            "stop_distance_excessive": 0,
+            "volume_confirmation_light": 1,
+            "b_grade_not_actionable": 0,
+            "missing_setup_confirmation": 0,
+            "other": 0,
+        },
+        "v3_selected_review": [
+            {
+                "ticker": "AAPL",
+                "delivery_type": "trade_alert",
+                "grade": "A",
+                "score": 82,
+                "decision": "WAIT",
+                "decision_subtype": "WAIT_VOLUME_CONFIRMATION",
+                "confidence": "MEDIUM",
+                "stop_distance_pct": 0.074,
+                "volume_ratio": 0.90,
+                "blockers": ["light_volume"],
+            }
+        ],
+        "v3_sample_decisions": [],
+    })
+
+    assert "V3 decisions: ENTER: 0 | WAIT: 1 | WATCHLIST_ONLY: 0 | AVOID: 0 | none: 0" in output
+    assert "- AAPL | A | WAIT | MEDIUM | score 82 | stop 7.4% | vol 0.90x | light_volume | subtype wait_volume" in output
+    assert "WAIT_VOLUME_CONFIRMATION" not in output
 
 
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):

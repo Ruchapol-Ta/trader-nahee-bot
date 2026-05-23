@@ -10,6 +10,7 @@ from config import (
     V2_MIN_MARKET_CAP,
     V2_MIN_PRICE,
 )
+from yfinance_cache import configure_yfinance_cache
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ def evaluate_liquidity(
 def fetch_ticker_metadata(ticker: str, log_warnings: bool = True) -> dict:
     """Best-effort yfinance metadata lookup for market cap and sector."""
     try:
+        configure_yfinance_cache()
         info = yf.Ticker(ticker).info or {}
         return {
             "market_cap": info.get("marketCap"),

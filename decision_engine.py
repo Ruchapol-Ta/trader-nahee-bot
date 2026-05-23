@@ -404,7 +404,7 @@ def _risk_warning_summary(
     if volume_ratio is None:
         warnings.append("volume confirmation data unavailable")
     elif volume_ratio < V3_ENTER_MIN_VOLUME_RATIO:
-        warnings.append(f"volume confirmation is light ({volume_ratio:.2f}x average)")
+        warnings.append(f"volume confirmation below threshold ({volume_ratio:.2f}x average)")
     if not extension["available"]:
         warnings.append("extension data unavailable")
     elif extension["mild"]:
@@ -685,7 +685,7 @@ def evaluate_signal_decision(
     if grade == "B" and actual_breakout and (
         volume_ratio is None or volume_ratio < V3_WAIT_MIN_VOLUME_RATIO
     ):
-        warning = "volume confirmation data unavailable" if volume_ratio is None else f"volume confirmation is weak ({volume_ratio:.2f}x average)"
+        warning = "volume confirmation data unavailable" if volume_ratio is None else f"volume confirmation below threshold ({volume_ratio:.2f}x average)"
         return _result(
             DECISION_WATCHLIST_ONLY,
             CONFIDENCE_MEDIUM,

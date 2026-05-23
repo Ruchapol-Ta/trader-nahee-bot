@@ -170,7 +170,9 @@ def test_b_actual_breakout_with_bad_volume_returns_watchlist_only():
 
     _assert_decision_shape(result)
     assert result["decision"] == "WATCHLIST_ONLY"
-    assert any("volume" in warning.lower() for warning in result["risk_warnings"])
+    assert any("volume confirmation below threshold" in warning.lower() for warning in result["risk_warnings"])
+    assert all("volume confirmation is light" not in warning.lower() for warning in result["risk_warnings"])
+    assert all("volume confirmation is weak" not in warning.lower() for warning in result["risk_warnings"])
     assert "NO_VOLUME_CONFIRMATION" in result["risk_flags"]
     assert result["trade_risk_mode"] == "NO_TRADE"
 
@@ -763,6 +765,9 @@ def test_a_grade_wide_stop_calibrates_to_wait_not_avoid():
     assert result["main_reason"] == "Setup quality is strong, but current stop distance is too wide for entry."
     assert "WIDE_STOP" in result["risk_flags"]
     assert "NO_VOLUME_CONFIRMATION" in result["risk_flags"]
+    assert any("volume confirmation below threshold" in warning.lower() for warning in result["risk_warnings"])
+    assert all("volume confirmation is light" not in warning.lower() for warning in result["risk_warnings"])
+    assert all("volume confirmation is weak" not in warning.lower() for warning in result["risk_warnings"])
     assert "Wait for a tighter stop below the V3 ENTER risk limit." in result["wait_conditions"]
     assert "Wait for acceptable volume confirmation." in result["wait_conditions"]
     assert result["trade_risk_mode"] == "NO_TRADE"

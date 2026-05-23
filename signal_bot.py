@@ -151,7 +151,7 @@ def format_v3_dry_run_review(result: dict) -> str:
 
     samples = result.get("v3_sample_decisions") or []
     if samples:
-        lines.append("Sample decisions:")
+        lines.append("Detailed examples:")
         for sample in samples:
             line = (
                 f"- {sample.get('ticker') or 'UNKNOWN'} | "
@@ -172,7 +172,7 @@ def format_v3_dry_run_review(result: dict) -> str:
             if warnings:
                 lines.append("  Warnings: " + "; ".join(str(item) for item in warnings[:2]))
     else:
-        lines.append("Sample decisions: none")
+        lines.append("Detailed examples: none")
 
     return "\n".join(lines)
 

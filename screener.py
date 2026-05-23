@@ -21,6 +21,7 @@ from config import (
     VCP_CONTRACTION_LOOKBACK_MID, VCP_CONTRACTION_LOOKBACK_LONG,
     VCP_PIVOT_LOOKBACK,
 )
+from yfinance_cache import configure_yfinance_cache
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,7 @@ def _download_chunk(chunk: list[str]) -> dict[str, pd.DataFrame]:
     if not chunk:
         return {}
 
+    configure_yfinance_cache()
     df = yf.download(
         chunk,
         period=DATA_PERIOD,

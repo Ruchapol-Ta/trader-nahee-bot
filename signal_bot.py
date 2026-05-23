@@ -120,6 +120,8 @@ def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
             f"vol {_format_ratio(row.get('volume_ratio'))} | "
             f"{blockers}"
         )
+        if row.get("decision_subtype"):
+            line += f" | subtype {row.get('decision_subtype')}"
         if row.get("v3_error"):
             line += f" | V3 error: {row.get('v3_error')}"
         lines.append(line)

@@ -476,6 +476,7 @@ def _v3_selected_review(trade_signals: list[dict], watchlist: list[dict]) -> lis
             "grade": signal.get("grade"),
             "score": signal.get("score"),
             "decision": decision_data.get("decision"),
+            "decision_subtype": decision_data.get("decision_subtype"),
             "confidence": decision_data.get("confidence"),
             "stop_distance_pct": _selected_stop_distance(signal, decision_data),
             "volume_ratio": _safe_ratio(

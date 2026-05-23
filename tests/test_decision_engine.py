@@ -55,6 +55,7 @@ def _assert_decision_shape(result):
         "risk_profile",
         "enter_max_stop_pct",
         "threshold_result",
+        "decision_subtype",
     }
     assert isinstance(result["supporting_reasons"], list)
     assert isinstance(result["risk_warnings"], list)
@@ -258,6 +259,7 @@ def test_a_grade_wide_structural_but_tactical_stop_under_enter_max_can_enter():
 
     _assert_decision_shape(result)
     assert result["decision"] == "ENTER"
+    assert result["decision_subtype"] is None
     assert result["decision_entry"] == 101.0
     assert result["decision_stop"] == 94.0
     assert result["decision_stop_source"] == "tactical"
@@ -293,6 +295,50 @@ def test_a_grade_tactical_stop_between_enter_and_watchlist_band_remains_wait():
     assert round(result["decision_stop_distance_pct"], 4) == 0.0891
     assert "WIDE_STOP" in result["risk_flags"]
     assert "STRUCTURAL_STOP_WIDE" in result["risk_flags"]
+    assert result["decision_subtype"] == "WAIT_TIGHTER_STOP"
+
+
+def test_a_grade_actual_breakout_waits_for_volume_confirmation_subtype():
+    result = evaluate_signal_decision(
+        _signal(
+            grade="A",
+            score=82,
+            volume=900_000.0,
+            avg_volume=1_000_000.0,
+            trade_plan={"entry": 100.0, "stop_loss": 94.0, "expected_rr": 2.5},
+        ),
+        market_regime={"is_valid": True, "summary": "Bullish market regime"},
+        enabled=True,
+    )
+
+    _assert_decision_shape(result)
+    assert result["decision"] == "WAIT"
+    assert result["decision_subtype"] == "WAIT_VOLUME_CONFIRMATION"
+    assert result["decision_stop_distance_pct"] == 0.06
+    assert result["threshold_result"]["within_enter_stop"] is True
+    assert "NO_VOLUME_CONFIRMATION" in result["risk_flags"]
+
+
+def test_a_grade_actual_breakout_waits_for_tighter_stop_and_volume_subtype():
+    result = evaluate_signal_decision(
+        _signal(
+            grade="A",
+            score=82,
+            volume=1_010_000.0,
+            avg_volume=1_000_000.0,
+            trade_plan={"entry": 100.0, "stop_loss": 87.4, "expected_rr": 2.5},
+        ),
+        market_regime={"is_valid": True, "summary": "Bullish market regime"},
+        enabled=True,
+    )
+
+    _assert_decision_shape(result)
+    assert result["decision"] == "WAIT"
+    assert result["decision_subtype"] == "WAIT_TIGHTER_STOP_AND_VOLUME"
+    assert round(result["decision_stop_distance_pct"], 3) == 0.126
+    assert result["threshold_result"]["within_enter_stop"] is False
+    assert "WIDE_STOP" in result["risk_flags"]
+    assert "NO_VOLUME_CONFIRMATION" in result["risk_flags"]
 
 
 def test_conservative_profile_keeps_adi_like_tactical_risk_as_wait(monkeypatch):

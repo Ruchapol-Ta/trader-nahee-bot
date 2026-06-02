@@ -10,7 +10,6 @@ from config import (
     ENABLE_SIGNAL_JOURNAL,
     ENABLE_V3_DECISION_LAYER,
     V2_MARKET_SYMBOLS,
-    V2_MAX_NEW_POSITIONS_PER_DAY,
     V2_MAX_WATCHLIST,
     V2_SETUP_TYPE,
 )
@@ -713,12 +712,16 @@ def run_v2_scan(
                 qualified.append(candidate)
 
         qualified.sort(key=lambda item: item["score"], reverse=True)
-        # Cap A/A+ trade alerts at the max new positions allowed per day.
-        trade_cap = V2_MAX_NEW_POSITIONS_PER_DAY
-        trade_signals = [
-            item for item in qualified
-            if item["grade"] in {"A+", "A"} and item.get("is_actual_breakout", True)
-        ][:trade_cap]
+        # Alert on every qualifying A/A+ breakout, ranked by score (highest first).
+        # A+ (score >= 85) always ranks above A (75-84) under score-descending order.
+        trade_signals = sorted(
+            [
+                item for item in qualified
+                if item["grade"] in {"A+", "A"} and item.get("is_actual_breakout", True)
+            ],
+            key=lambda item: item["score"],
+            reverse=True,
+        )
         watchlist = [
             item for item in qualified
             if item["grade"] == "B"

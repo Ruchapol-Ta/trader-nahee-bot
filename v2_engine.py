@@ -11,7 +11,6 @@ from config import (
     ENABLE_V3_DECISION_LAYER,
     V2_MARKET_SYMBOLS,
     V2_MAX_NEW_POSITIONS_PER_DAY,
-    V2_MAX_TRADE_SIGNALS,
     V2_MAX_WATCHLIST,
     V2_SETUP_TYPE,
 )
@@ -142,7 +141,7 @@ def _record_setup_funnel(diagnostics: dict | None, relative_strength: dict, setu
         funnel["breakout_passed"] += 1
 
 
-def _safe_ratio(numerator: float | None, denominator: float | None) -> float:
+def _ratio_or_zero(numerator: float | None, denominator: float | None) -> float:
     """Return a rounded ratio for diagnostics, or 0 when data is unusable."""
     try:
         if numerator is None or denominator in (None, 0):
@@ -167,8 +166,8 @@ def _near_miss_summary(data: dict, setup: dict, score: dict, failed_conditions: 
             "price": round(close, 2),
             "distance_from_52w_high_pct": round(distance, 2),
             "relative_strength_20d": round(float(data.get("return_20d", 0) or 0), 2),
-            "atr_contraction_value": _safe_ratio(data.get("atr"), data.get("atr_sma20")),
-            "volume_ratio": _safe_ratio(data.get("volume"), data.get("avg_volume")),
+            "atr_contraction_value": _ratio_or_zero(data.get("atr"), data.get("atr_sma20")),
+            "volume_ratio": _ratio_or_zero(data.get("volume"), data.get("avg_volume")),
             "breakout_status": bool(checks.get("breakout")),
             "near_breakout_status": bool(checks.get("near_breakout")),
         }
@@ -436,7 +435,7 @@ def _finite_number(value: object) -> float | None:
         return None
 
 
-def _safe_ratio(numerator: object, denominator: object) -> float | None:
+def _ratio_or_none(numerator: object, denominator: object) -> float | None:
     top = _finite_number(numerator)
     bottom = _finite_number(denominator)
     if top is None or bottom in (None, 0):
@@ -479,7 +478,7 @@ def _v3_selected_review(trade_signals: list[dict], watchlist: list[dict]) -> lis
             "decision_subtype": decision_data.get("decision_subtype"),
             "confidence": decision_data.get("confidence"),
             "stop_distance_pct": _selected_stop_distance(signal, decision_data),
-            "volume_ratio": _safe_ratio(
+            "volume_ratio": _ratio_or_none(
                 signal.get("volume"),
                 signal.get("avg_volume") or signal.get("vol_sma20"),
             ),
@@ -714,7 +713,8 @@ def run_v2_scan(
                 qualified.append(candidate)
 
         qualified.sort(key=lambda item: item["score"], reverse=True)
-        trade_cap = min(V2_MAX_TRADE_SIGNALS, V2_MAX_NEW_POSITIONS_PER_DAY)
+        # Cap A/A+ trade alerts at the max new positions allowed per day.
+        trade_cap = V2_MAX_NEW_POSITIONS_PER_DAY
         trade_signals = [
             item for item in qualified
             if item["grade"] in {"A+", "A"} and item.get("is_actual_breakout", True)

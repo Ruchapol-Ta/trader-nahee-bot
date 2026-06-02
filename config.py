@@ -73,7 +73,6 @@ V2_SCORE_WEIGHTS = {
     "volume_quality": 10,
     "risk_reward": 10,
 }
-V2_MAX_TRADE_SIGNALS = 20
 V2_MAX_WATCHLIST = 10
 
 # Risk framework
@@ -91,10 +90,10 @@ V2_BUY_STOP_BUFFER_PCT = 0.001
 V2_HOLDING_STYLE = "Swing: 3 trading days to 8 weeks; trail with 10EMA/20EMA"
 
 # === Pre-V3 Foundation ===
-ENABLE_V3_DECISION_LAYER = False
+ENABLE_V3_DECISION_LAYER = True
 ENABLE_SIGNAL_JOURNAL = True
-ENABLE_POSITION_SIZING = False
-ENABLE_V3_TELEGRAM_FORMAT = False
+ENABLE_POSITION_SIZING = True
+ENABLE_V3_TELEGRAM_FORMAT = True
 
 JOURNAL_PATH = "data/signal_journal.jsonl"
 

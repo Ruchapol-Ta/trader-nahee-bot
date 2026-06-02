@@ -1,6 +1,6 @@
 # message_formatter.py - concise V2 Telegram messages.
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 
@@ -16,7 +16,7 @@ def _timestamp() -> str:
         return datetime.now(_MARKET_TZ).strftime("%Y-%m-%d %H:%M %Z")
     except Exception as e:
         logger.warning(f"[FormatterV2] Timestamp failed: {e}")
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def format_market_summary(market_regime: dict, stats: dict | None = None) -> str:

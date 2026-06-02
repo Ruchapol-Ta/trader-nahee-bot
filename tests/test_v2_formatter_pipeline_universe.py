@@ -296,32 +296,38 @@ def test_c_and_reject_candidates_are_not_sent_to_telegram(monkeypatch):
     assert result["funnel"]["C_count"] == 1
 
 
-def test_trade_alerts_are_capped_by_max_new_positions_per_day(monkeypatch):
-    captured = {"trade_count": None}
+def test_all_qualifying_trade_alerts_are_included_and_ranked_by_score(monkeypatch):
+    captured = {"trade_signals": None}
 
     monkeypatch.setattr(
         v2_engine,
         "load_market_regime",
         lambda: _regime(market_data={"SPY": {"return_20d": 1.0}, "QQQ": {"return_20d": 2.0}}),
     )
-    monkeypatch.setattr(v2_engine, "get_v2_universe", lambda: ["A", "B", "C"])
+    # Universe is intentionally out of score order to prove the sort reorders.
+    monkeypatch.setattr(v2_engine, "get_v2_universe", lambda: ["MID", "TOP", "LOWA"])
     monkeypatch.setattr(
         v2_engine,
         "screen_universe",
         lambda tickers: [_candidate_row(ticker=ticker) for ticker in tickers],
     )
+    grade_score_by_ticker = {
+        "TOP": ("A+", 95),
+        "MID": ("A+", 90),
+        "LOWA": ("A", 80),
+    }
     monkeypatch.setattr(
         v2_engine,
         "qualify_snapshot",
         lambda snapshot, market_regime, spy_return, qqq_return, **kwargs: _signal(
             ticker=snapshot["ticker"],
-            grade="A+",
-            score=90,
+            grade=grade_score_by_ticker[snapshot["ticker"]][0],
+            score=grade_score_by_ticker[snapshot["ticker"]][1],
         ),
     )
 
     def fake_report(market_regime, trade_signals, watchlist, stats):
-        captured["trade_count"] = len(trade_signals)
+        captured["trade_signals"] = trade_signals
         return 1
 
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
@@ -329,7 +335,11 @@ def test_trade_alerts_are_capped_by_max_new_positions_per_day(monkeypatch):
     result = v2_engine.run_v2_scan()
 
     assert result["market_regime_valid"] is True
-    assert captured["trade_count"] == 2
+    # No daily cap: every qualifying A/A+ breakout is alerted, ranked by score
+    # descending (A+ ahead of A).
+    assert [item["ticker"] for item in captured["trade_signals"]] == ["TOP", "MID", "LOWA"]
+    scores = [item["score"] for item in captured["trade_signals"]]
+    assert scores == sorted(scores, reverse=True)
 
 
 def test_v2_scan_reports_filter_funnel_and_reject_aggregation(monkeypatch):

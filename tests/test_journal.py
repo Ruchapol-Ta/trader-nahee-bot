@@ -146,7 +146,7 @@ def test_build_signal_record_includes_delivery_type_and_v2_v3_fields():
     assert record["tactical_stop_source"] == "recent_5d_low"
     assert record["tactical_stop_distance_pct"] == 0.035
     assert record["risk_reward"] == 2.5
-    assert record["raw_signal"]["ticker"] == "AAPL"
+    assert "raw_signal" not in record
 
 
 def test_journal_signals_writes_trade_alerts_and_watchlist_jsonl():
@@ -173,14 +173,17 @@ def test_journal_converts_unserializable_values_without_crashing():
     root = _test_path("safe")
     try:
         journal_path = root / "signal_journal.jsonl"
-        signal = _signal(raw_object={1, 2, 3})
+        signal = _signal()
+        # Put an unserializable value inside a kept field (supporting_reasons).
+        signal["v3_decision"]["supporting_reasons"] = [{1, 2, 3}]
 
         written = journal_signals([signal], [], path=journal_path, run_id="run-3")
 
         assert written == 1
         record = json.loads(journal_path.read_text(encoding="utf-8"))
-        assert "raw_signal" in record
-        assert "raw_object" in record["raw_signal"]
+        assert "raw_signal" not in record
+        # the set was sanitized to a list without crashing the writer
+        assert isinstance(record["supporting_reasons"][0], list)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -415,11 +418,13 @@ def test_journal_serializes_datetime_pandas_and_nan_as_strict_json():
     root = _test_path("strict_json")
     try:
         journal_path = root / "signal_journal.jsonl"
-        signal = _signal(
-            raw_datetime=datetime(2026, 5, 9, tzinfo=timezone.utc),
-            raw_timestamp=pd.Timestamp("2026-05-09T20:00:00Z"),
-            raw_nan=float("nan"),
-        )
+        signal = _signal()
+        # Embed datetime / pandas / NaN inside a kept nested field.
+        signal["v3_decision"]["threshold_result"] = {
+            "as_of_datetime": datetime(2026, 5, 9, tzinfo=timezone.utc),
+            "as_of_timestamp": pd.Timestamp("2026-05-09T20:00:00Z"),
+            "raw_nan": float("nan"),
+        }
 
         written = journal_signals([signal], [], path=journal_path, run_id="run-6")
 
@@ -427,12 +432,13 @@ def test_journal_serializes_datetime_pandas_and_nan_as_strict_json():
         raw_text = journal_path.read_text(encoding="utf-8")
         assert "NaN" not in raw_text
         record = json.loads(raw_text)
-        assert record["raw_signal"]["raw_nan"] is None
-        assert isinstance(record["raw_signal"]["raw_datetime"], str)
-        assert isinstance(record["raw_signal"]["raw_timestamp"], str)
+        threshold = record["threshold_result"]
+        assert threshold["raw_nan"] is None
+        assert isinstance(threshold["as_of_datetime"], str)
+        assert isinstance(threshold["as_of_timestamp"], str)
         assert not any(
             isinstance(value, float) and math.isnan(value)
-            for value in record["raw_signal"].values()
+            for value in threshold.values()
         )
     finally:
         shutil.rmtree(root, ignore_errors=True)

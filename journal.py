@@ -119,7 +119,6 @@ def build_signal_record(
         "threshold_result": decision.get("threshold_result"),
         "sizing_result": _json_safe(position_size) if position_size else None,
         "telegram_message_text": telegram_message_text,
-        "raw_signal": _json_safe(signal),
     }
 
 

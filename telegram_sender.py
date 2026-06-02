@@ -17,6 +17,7 @@ import requests
 from dotenv import load_dotenv
 
 import config as runtime_config
+import message_formatter
 from formatter import format_signal_message, format_summary_message
 from message_formatter import (
     format_market_summary,
@@ -269,6 +270,18 @@ def send_v2_market_summary(market_regime: dict, stats: dict | None = None) -> in
         return 0
 
 
+def _is_suppressed_avoid(signal: dict) -> bool:
+    """True when a V3 AVOID signal should be withheld from Telegram alerts.
+
+    Only applies while the V3 Telegram format is active. Suppressed signals are
+    still journaled upstream; they are simply not sent as alerts.
+    """
+    if not message_formatter.ENABLE_V3_TELEGRAM_FORMAT:
+        return False
+    decision = signal.get("v3_decision")
+    return isinstance(decision, dict) and decision.get("decision") == "AVOID"
+
+
 def send_v2_report(
     market_regime: dict,
     trade_signals: list[dict],
@@ -281,7 +294,12 @@ def send_v2_report(
         if send_message(format_market_summary(market_regime, stats)):
             sent += 1
 
+        alerts_to_send = 0
         for signal in trade_signals:
+            if _is_suppressed_avoid(signal):
+                logger.info(f"[V3] Suppressed AVOID signal: {signal.get('ticker')}")
+                continue
+            alerts_to_send += 1
             if send_message(format_trade_signal_message(signal)):
                 sent += 1
             else:
@@ -293,7 +311,7 @@ def send_v2_report(
             if send_message(format_watchlist_summary(watchlist, market_regime)):
                 sent += 1
 
-        expected = 1 + len(trade_signals) + (1 if watchlist else 0)
+        expected = 1 + alerts_to_send + (1 if watchlist else 0)
         logger.info(f"[Telegram] V2 delivered {sent}/{expected} messages")
         return sent
     except Exception as e:

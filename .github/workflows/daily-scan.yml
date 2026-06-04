@@ -1,0 +1,82 @@
+name: Daily EOD Scan
+
+# Runs the V2/V3 end-of-day scan after the US close on US trading days.
+# GitHub Actions cron is ALWAYS UTC. 21:30 UTC = 04:30 Asia/Bangkok (next day).
+#   "30 21 * * 1-5"  ->  21:30 UTC Mon-Fri  ->  04:30 BKK Tue-Sat
+#   This intentionally tracks each US weekday close (US session runs Mon-Fri).
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run-now (live: sends Telegram + writes journal) OR dry-run-review (no send, no journal)"
+        type: choice
+        default: run-now
+        options:
+          - run-now
+          - dry-run-review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-eod-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required secret is present
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret is not set (repo Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+
+      - name: Run EOD scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Defaults to 'test' if the secret is unset, so CI never accidentally hits prod.
+          TELEGRAM_TARGET_MODE: ${{ secrets.TELEGRAM_TARGET_MODE || 'test' }}
+          TELEGRAM_TEST_CHAT_ID: ${{ secrets.TELEGRAM_TEST_CHAT_ID }}
+          TELEGRAM_PROD_CHAT_ID: ${{ secrets.TELEGRAM_PROD_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Scheduled runs have no inputs -> default to run-now. Manual runs can pick dry-run-review.
+          MODE: ${{ github.event.inputs.mode || 'run-now' }}
+        run: |
+          echo "Run mode: $MODE | Telegram target mode: ${TELEGRAM_TARGET_MODE}"
+          if [ "$MODE" = "dry-run-review" ]; then
+            python signal_bot.py --v3-dry-run-review
+          else
+            python signal_bot.py --run-now
+          fi
+
+      - name: Upload logs and journal (always, for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-output-${{ github.run_id }}
+          path: |
+            signal_bot.log*
+            data/signal_journal.jsonl
+          if-no-files-found: warn
+          retention-days: 14

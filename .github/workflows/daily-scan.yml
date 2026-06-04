@@ -17,6 +17,10 @@ on:
           - run-now
           - dry-run-review
 
+env:
+  # Opt JavaScript (node20) actions into the Node 24 runtime ahead of the default migration.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
 
@@ -30,10 +34,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.3.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.11"
           cache: pip
@@ -72,7 +76,7 @@ jobs:
 
       - name: Upload logs and journal (always, for debugging)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: scan-output-${{ github.run_id }}
           path: |

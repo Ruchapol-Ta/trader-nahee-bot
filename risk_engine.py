@@ -167,6 +167,28 @@ def build_trade_plan(data: dict) -> dict | None:
         target_1 = _money(entry + risk_per_share * V2_TARGET_1_R)
         target_2 = _money(entry + risk_per_share * V2_TARGET_2_R)
 
+        # Resistance-aware R:R: cap the reward leg at the nearest overhead level
+        # (52-week high or pivot) so expected_rr reflects realistic upside.
+        resistance_options = []
+        high_52w = _value(data, "high_52w")
+        pivot = _value(data, "pivot")
+        if high_52w is not None and high_52w > entry:
+            resistance_options.append(("high_52w", high_52w))
+        if pivot is not None and pivot > entry:
+            resistance_options.append(("pivot", pivot))
+        capped_target_1 = target_1
+        rr_resistance_source = None
+        if resistance_options:
+            resistance_source, resistance = min(resistance_options, key=lambda item: item[1])
+            effective_resistance = resistance * 0.98
+            # Floor the cap at entry: if the buffer pulls resistance to/below
+            # entry, there is no usable upside cap — fall back to target_1.
+            if effective_resistance > entry:
+                capped_target_1 = min(target_1, effective_resistance)
+                if capped_target_1 != target_1:
+                    rr_resistance_source = resistance_source
+        actual_rr = round((capped_target_1 - entry) / risk_per_share, 2)
+
         return {
             "entry": entry,
             "buy_stop": buy_stop,
@@ -181,7 +203,9 @@ def build_trade_plan(data: dict) -> dict | None:
             "risk_per_share": risk_per_share,
             "target_1": target_1,
             "target_2": target_2,
-            "expected_rr": V2_TARGET_1_R,
+            "expected_rr": actual_rr,
+            "rr_capped": capped_target_1 != target_1,
+            "rr_resistance_source": rr_resistance_source,
             "position_size": "Portfolio size required",
             "holding_style": V2_HOLDING_STYLE,
         }

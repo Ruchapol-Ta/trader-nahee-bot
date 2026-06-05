@@ -210,7 +210,7 @@ def test_score_candidate_sums_required_category_scores():
         liquidity={"passed": True},
         relative_strength={"passed": True},
         setup=setup,
-        trade_plan={"expected_rr": 2.5},
+        trade_plan={"expected_rr": 2.5, "structural_stop_distance_pct": 0.065},
     )
 
     assert score["score"] == 100

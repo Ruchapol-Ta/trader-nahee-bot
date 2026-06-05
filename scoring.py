@@ -7,7 +7,6 @@ from config import (
     V2_SCORE_B_MIN,
     V2_SCORE_C_MIN,
     V2_SCORE_WEIGHTS,
-    V2_TARGET_1_R,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +81,7 @@ def score_candidate(
                 if checks.get("volume_dry_up") and checks.get("breakout_volume") else 0,
             ),
             "risk_reward": V2_SCORE_WEIGHTS["risk_reward"]
-            if trade_plan and trade_plan.get("expected_rr", 0) >= V2_TARGET_1_R else 0,
+            if trade_plan and trade_plan.get("structural_stop_distance_pct") is not None else 0,
         }
         score = int(sum(category_scores.values()))
         return {

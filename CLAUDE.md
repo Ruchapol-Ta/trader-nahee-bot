@@ -87,6 +87,18 @@ recent_cross_scan.py
 smoke_test.py
 ```
 
+## Open Items (V3 Rollout Remaining)
+
+These two items are confirmed incomplete — do not assume they are done:
+
+1. **`risk_engine.py` — R:R calculation hardcoded at 2.5**: Fix to dynamic calculation. Do not touch any other logic in `risk_engine.py` until this is resolved.
+2. **`TELEGRAM_TARGET_MODE` still in test mode**: Must be flipped to `prod` before live scheduling is enabled. Confirm with user before switching.
+
+## Known Issues / Quirks
+
+- R:R is currently hardcoded at 2.5 in `risk_engine.py` — do not treat this as correct behavior
+- `TELEGRAM_TARGET_MODE` in test mode means alerts go to test chat, not prod chat — do not assume prod is live
+
 ## V3 Goal
 V3 should upgrade the bot from a Signal Alert Bot into a Trade Decision Assistant.
 
@@ -141,6 +153,13 @@ Before implementing full V3, complete these foundation steps:
 - Preserve Telegram sending behavior.
 - Keep live Telegram sends limited during testing.
 - Use pytest and compileall before commit.
+
+## Hard Rules
+- **Do NOT fix `risk_engine.py` R:R and change `TELEGRAM_TARGET_MODE` in the same commit** — keep them separate and confirm each with user first.
+- **Do NOT flip `TELEGRAM_TARGET_MODE` to prod** without explicit user confirmation — this triggers live alerts.
+- **Always run `pytest` + `compileall` before any commit**.
+- **Do NOT delete V1 modules** unless explicitly requested.
+- **Do NOT push** unless explicitly requested.
 
 ## Suggested V3 Config Flags
 Add to `config.py` or the existing config location:

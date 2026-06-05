@@ -89,14 +89,14 @@ smoke_test.py
 
 ## Open Items (V3 Rollout Remaining)
 
-These two items are confirmed incomplete — do not assume they are done:
+Item 1 is resolved. Item 2 remains confirmed incomplete — do not assume it is done:
 
-1. **`risk_engine.py` — R:R calculation hardcoded at 2.5**: Fix to dynamic calculation. Do not touch any other logic in `risk_engine.py` until this is resolved.
+1. **`risk_engine.py` — R:R calculation hardcoded at 2.5** — ✅ RESOLVED: `expected_rr` is now resistance-aware with a floor guard at entry, and `scoring.py` is decoupled from `expected_rr`.
 2. **`TELEGRAM_TARGET_MODE` still in test mode**: Must be flipped to `prod` before live scheduling is enabled. Confirm with user before switching.
 
 ## Known Issues / Quirks
 
-- R:R is currently hardcoded at 2.5 in `risk_engine.py` — do not treat this as correct behavior
+- R:R (`expected_rr`) is now resistance-aware in `risk_engine.py` with a floor guard; `scoring.py` no longer keys scoring off it (was hardcoded at 2.5)
 - `TELEGRAM_TARGET_MODE` in test mode means alerts go to test chat, not prod chat — do not assume prod is live
 
 ## V3 Goal

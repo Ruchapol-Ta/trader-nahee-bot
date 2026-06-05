@@ -17,10 +17,6 @@ on:
           - run-now
           - dry-run-review
 
-env:
-  # Opt JavaScript (node20) actions into the Node 24 runtime ahead of the default migration.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 permissions:
   contents: read
 
@@ -34,10 +30,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.3.1
+        uses: actions/checkout@v6.0.3
 
       - name: Set up Python
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.11"
           cache: pip

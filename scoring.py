@@ -30,6 +30,26 @@ def grade_for_score(score: int | float) -> str:
         return "Reject"
 
 
+def _risk_reward_points(trade_plan: dict | None) -> int:
+    """Graduated risk_reward points keyed on expected_rr.
+
+    >= 2.0 R -> full weight; >= 1.5 R -> 6; >= 1.0 R -> 3; otherwise 0.
+    """
+    if not isinstance(trade_plan, dict):
+        return 0
+    try:
+        expected_rr = float(trade_plan.get("expected_rr"))
+    except (TypeError, ValueError):
+        return 0
+    if expected_rr >= 2.0:
+        return V2_SCORE_WEIGHTS["risk_reward"]
+    if expected_rr >= 1.5:
+        return 6
+    if expected_rr >= 1.0:
+        return 3
+    return 0
+
+
 def score_candidate(
     market_regime: dict,
     liquidity: dict,
@@ -80,8 +100,7 @@ def score_candidate(
                 V2_SCORE_WEIGHTS["volume_quality"]
                 if checks.get("volume_dry_up") and checks.get("breakout_volume") else 0,
             ),
-            "risk_reward": V2_SCORE_WEIGHTS["risk_reward"]
-            if trade_plan and trade_plan.get("structural_stop_distance_pct") is not None else 0,
+            "risk_reward": _risk_reward_points(trade_plan),
         }
         score = int(sum(category_scores.values()))
         return {

@@ -247,6 +247,10 @@ def test_valid_lower_quality_setup_becomes_b_watchlist_candidate(monkeypatch):
             avg_volume=1_200_000.0,
             volume=1_205_000.0,
             pivot=99.90,
+            # Tight stop -> reward:risk ~2R (expected_rr 1.95) so this stays a
+            # valid B after risk_reward scoring was re-coupled to expected_rr.
+            contraction_low=99.0,
+            pivot_low=99.0,
         ),
         _regime(reasons=["market regime bullish"]),
         spy_return=4.0,

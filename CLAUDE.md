@@ -91,12 +91,12 @@ smoke_test.py
 
 Item 1 is resolved. Item 2 remains confirmed incomplete — do not assume it is done:
 
-1. **`risk_engine.py` — R:R calculation hardcoded at 2.5** — ✅ RESOLVED: `expected_rr` is now resistance-aware with a floor guard at entry, and `scoring.py` is decoupled from `expected_rr`.
+1. **`risk_engine.py` — R:R calculation hardcoded at 2.5** — ✅ RESOLVED: `expected_rr` is resistance-aware (capped at the nearest of `high_52w`/`pivot` × 0.98, floored at entry). `scoring.py` `risk_reward` is graduated on `expected_rr`: ≥2.0→10pts, ≥1.5→6pts, ≥1.0→3pts, <1.0→0pts.
 2. **`TELEGRAM_TARGET_MODE` still in test mode**: Must be flipped to `prod` before live scheduling is enabled. Confirm with user before switching.
 
 ## Known Issues / Quirks
 
-- R:R (`expected_rr`) is now resistance-aware in `risk_engine.py` with a floor guard; `scoring.py` no longer keys scoring off it (was hardcoded at 2.5)
+- R:R (`expected_rr`) is resistance-aware in `risk_engine.py` (capped at nearest of `high_52w`/`pivot` × 0.98, floored at entry); `scoring.py` `risk_reward` is graduated on it (≥2.0→10, ≥1.5→6, ≥1.0→3, <1.0→0) — was hardcoded at 2.5
 - `TELEGRAM_TARGET_MODE` in test mode means alerts go to test chat, not prod chat — do not assume prod is live
 
 ## V3 Goal

@@ -17,8 +17,9 @@ on:
           - run-now
           - dry-run-review
 
+# write: the persist-journal step pushes journal history to the journal-data branch.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: daily-eod-scan
@@ -69,6 +70,42 @@ jobs:
           else
             python signal_bot.py --run-now
           fi
+
+      - name: Persist journal to journal-data branch
+        # Skipped when the scan step failed (default step success check) and on
+        # manual dry-run-review runs (which never write a journal anyway).
+        # Scheduled runs have no inputs -> mode defaults to run-now -> persists.
+        if: ${{ (github.event.inputs.mode || 'run-now') == 'run-now' }}
+        run: |
+          set -e
+          if [ ! -s data/signal_journal.jsonl ]; then
+            echo "No journal records produced; nothing to persist."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT="$RUNNER_TEMP/journal-wt"
+          # Fetch the freshest branch tip immediately before appending and
+          # pushing (pull-before-push); the daily-eod-scan concurrency group
+          # already serializes scan runs, so races are effectively impossible.
+          if git fetch origin journal-data; then
+            git worktree add -B journal-data "$WT" FETCH_HEAD
+          else
+            # First run ever: create the orphan data branch from an empty tree
+            # so journal history shares no ancestry with main.
+            EMPTY_TREE=$(git hash-object -t tree /dev/null)
+            INIT_COMMIT=$(git commit-tree "$EMPTY_TREE" -m "journal: initialize data branch")
+            git branch journal-data "$INIT_COMMIT"
+            git worktree add "$WT" journal-data
+          fi
+          mkdir -p "$WT/data"
+          # A fresh CI checkout starts with no journal file, so today's file
+          # holds exactly this run's records — append them to branch history.
+          cat data/signal_journal.jsonl >> "$WT/data/signal_journal.jsonl"
+          cd "$WT"
+          git add data/signal_journal.jsonl
+          git commit -m "journal: run ${GITHUB_RUN_ID} ($(date -u +%Y-%m-%d))"
+          git push origin journal-data
 
       - name: Upload logs and journal (always, for debugging)
         if: always()

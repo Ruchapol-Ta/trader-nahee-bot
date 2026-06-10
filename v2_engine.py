@@ -3,12 +3,16 @@ import copy
 import logging
 import math
 from collections import Counter
+from datetime import datetime
 from uuid import uuid4
+
+import pytz
 
 from config import (
     ENABLE_POSITION_SIZING,
     ENABLE_SIGNAL_JOURNAL,
     ENABLE_V3_DECISION_LAYER,
+    MARKET_TIMEZONE,
     V2_MARKET_SYMBOLS,
     V2_MAX_WATCHLIST,
     V2_SETUP_TYPE,
@@ -633,6 +637,40 @@ def qualify_snapshot(
         return None
 
 
+_US_MARKET_CLOSE_HOUR = 16  # 4 PM ET — daily bars are final only after this
+
+
+def _warn_if_intraday_run(market_regime: dict, now_et: datetime | None = None) -> bool:
+    """Warn loudly when the latest SPY bar is today's still-open US session.
+
+    An intraday run sees a partial daily bar: volume ratios and breakout-volume
+    checks are misleadingly low. This never blocks the run — it only logs.
+    """
+    try:
+        spy_bar = (
+            market_regime.get("market_data", {}).get("SPY", {}).get("latest_bar_date")
+        )
+        if not spy_bar:
+            return False
+        market_tz = pytz.timezone(MARKET_TIMEZONE)
+        if now_et is None:
+            now_et = datetime.now(market_tz)
+        is_intraday = (
+            str(spy_bar) == now_et.strftime("%Y-%m-%d")
+            and now_et.hour < _US_MARKET_CLOSE_HOUR
+        )
+        if is_intraday:
+            logger.warning(
+                "[Warning] Intraday run detected — volume data may be incomplete "
+                f"(SPY bar {spy_bar}, US market not yet closed at "
+                f"{now_et.strftime('%H:%M')} ET)"
+            )
+        return is_intraday
+    except Exception as e:
+        logger.warning(f"[V2] Intraday-run check failed: {e}")
+        return False
+
+
 def run_v2_scan(
     debug: bool = False,
     send_telegram: bool = True,
@@ -676,6 +714,7 @@ def run_v2_scan(
                 "v3_sample_decisions": [],
             }
 
+        _warn_if_intraday_run(market_regime)
         tickers = get_v2_universe()
         logger.info(f"[V2] Screening {len(tickers)} V2 tickers")
         snapshots = screen_universe(tickers)

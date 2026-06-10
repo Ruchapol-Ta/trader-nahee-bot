@@ -1,7 +1,7 @@
 # PROJECT: Signal Bot 🤖
 
 ## Current Status
-Signal Bot is now a Python 3.10+ EOD Telegram trading signal bot with V2 already implemented, committed, and pushed.
+Signal Bot is a Python 3.10+ EOD Telegram trading signal bot. V2 plus the V3 decision layer are implemented and **live in production**: a GitHub Actions workflow (`.github/workflows/daily-scan.yml`, cron 21:30 UTC Mon–Fri) runs `python signal_bot.py --run-now`. The Telegram target mode in CI comes from the `TELEGRAM_TARGET_MODE` repo secret (workflow defaults to `test` if the secret is unset); prod has been enabled with user confirmation.
 
 V2 is no longer the original EMA 9/21 + RSI-only bot. Do not use the old V1 assumptions as the source of truth.
 
@@ -37,6 +37,13 @@ One-off V2 debug run:
 
 ```bash
 python signal_bot.py --run-now --debug-v2
+```
+
+V3 dry-run review (no Telegram, no journal) and Telegram rollout check:
+
+```bash
+python signal_bot.py --v3-dry-run-review
+python signal_bot.py --telegram-rollout-check
 ```
 
 Validation:
@@ -89,15 +96,18 @@ smoke_test.py
 
 ## Open Items (V3 Rollout Remaining)
 
-Item 1 is resolved. Item 2 remains confirmed incomplete — do not assume it is done:
+Both original items are resolved:
 
 1. **`risk_engine.py` — R:R calculation hardcoded at 2.5** — ✅ RESOLVED: `expected_rr` is resistance-aware (capped at the nearest of `high_52w`/`pivot` × 0.98, floored at entry). `scoring.py` `risk_reward` is graduated on `expected_rr`: ≥2.0→10pts, ≥1.5→6pts, ≥1.0→3pts, <1.0→0pts.
-2. **`TELEGRAM_TARGET_MODE` still in test mode**: Must be flipped to `prod` before live scheduling is enabled. Confirm with user before switching.
+2. **`TELEGRAM_TARGET_MODE`** — ✅ RESOLVED: prod is live. Local `.env` is `prod`; CI mode comes from the `TELEGRAM_TARGET_MODE` repo secret (defaults to `test` when unset). Do not change the mode without explicit user confirmation.
 
 ## Known Issues / Quirks
 
 - R:R (`expected_rr`) is resistance-aware in `risk_engine.py` (capped at nearest of `high_52w`/`pivot` × 0.98, floored at entry); `scoring.py` `risk_reward` is graduated on it (≥2.0→10, ≥1.5→6, ≥1.0→3, <1.0→0) — was hardcoded at 2.5
-- `TELEGRAM_TARGET_MODE` in test mode means alerts go to test chat, not prod chat — do not assume prod is live
+- `TELEGRAM_TARGET_MODE` is **prod** (live alerts). `test`/`preview` route to the test chat; CI mode is controlled by the `TELEGRAM_TARGET_MODE` repo secret
+- `--run-now` exits with code 1 when the scan pipeline fails, so GitHub Actions marks failed runs red; the scheduler-daemon path still swallows failures after sending a Telegram error alert
+- Runs before 16:00 ET with a same-day SPY bar log `[Warning] Intraday run detected` — volume data is partial on such runs; the 21:30 UTC scheduled run is safe
+- The signal journal on GitHub Actions is ephemeral: `data/signal_journal.jsonl` survives only as a per-run artifact (14-day retention); there is no durable journal history yet
 
 ## V3 Goal
 V3 should upgrade the bot from a Signal Alert Bot into a Trade Decision Assistant.
@@ -125,7 +135,7 @@ Decision output should include:
 - next_action
 
 ## Pre-V3 Foundation Requirements
-Before implementing full V3, complete these foundation steps:
+✅ All complete (journal, decision engine, position sizing, V3 formatter, and tests are shipped). Kept for reference:
 
 1. Update project docs so they reflect V2/V3, not old V1 assumptions.
 2. Add V3 config flags.
@@ -155,20 +165,18 @@ Before implementing full V3, complete these foundation steps:
 - Use pytest and compileall before commit.
 
 ## Hard Rules
-- **Do NOT fix `risk_engine.py` R:R and change `TELEGRAM_TARGET_MODE` in the same commit** — keep them separate and confirm each with user first.
-- **Do NOT flip `TELEGRAM_TARGET_MODE` to prod** without explicit user confirmation — this triggers live alerts.
+- **Do NOT change `TELEGRAM_TARGET_MODE`** (currently `prod` — live alerts) without explicit user confirmation; the same applies to the CI `TELEGRAM_TARGET_MODE` repo secret.
 - **Always run `pytest` + `compileall` before any commit**.
 - **Do NOT delete V1 modules** unless explicitly requested.
 - **Do NOT push** unless explicitly requested.
 
-## Suggested V3 Config Flags
-Add to `config.py` or the existing config location:
+## V3 Config Flags (implemented — current values in `config.py`)
 
 ```python
-ENABLE_V3_DECISION_LAYER = False
+ENABLE_V3_DECISION_LAYER = True
 ENABLE_SIGNAL_JOURNAL = True
-ENABLE_POSITION_SIZING = False
-ENABLE_V3_TELEGRAM_FORMAT = False
+ENABLE_POSITION_SIZING = True
+ENABLE_V3_TELEGRAM_FORMAT = True
 
 JOURNAL_PATH = "data/signal_journal.jsonl"
 
@@ -176,16 +184,17 @@ MOCK_PORTFOLIO_SIZE = 10000.0
 DEFAULT_RISK_PER_TRADE_PCT = 0.01
 
 RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_TINY_PCT = 0.0025
+RISK_MODE_SMALL_PCT = 0.005
 RISK_MODE_NORMAL_PCT = 0.01
 RISK_MODE_AGGRESSIVE_PCT = 0.02
 ```
 
-## Suggested Pre-V3 Modules
-Add only if they do not already exist:
+## Pre-V3 Modules (implemented)
 
 ```text
 journal.py             # JSONL signal/run storage
-decision_engine.py     # ENTER/WAIT/WATCHLIST_ONLY/AVOID skeleton
+decision_engine.py     # ENTER/WAIT/WATCHLIST_ONLY/AVOID decisions
 position_sizing.py     # mock portfolio sizing calculation
 ```
 

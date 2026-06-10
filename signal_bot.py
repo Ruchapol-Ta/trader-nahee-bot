@@ -208,8 +208,13 @@ def run_v3_dry_run_review() -> dict:
         v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer
 
 
-def run_scan() -> None:
-    """Run the full EOD pipeline. Any failure is surfaced via Telegram."""
+def run_scan() -> bool:
+    """Run the full EOD pipeline. Returns False when the scan failed.
+
+    Failures are alerted via Telegram and swallowed here so the scheduler
+    daemon survives a bad day; one-off runners (--run-now / CI) use the
+    return value to decide the process exit code.
+    """
     start = datetime.now()
     logger.info("=" * 50)
     logger.info("[Bot] Starting EOD scan...")
@@ -220,13 +225,14 @@ def run_scan() -> None:
     except Exception as e:
         logger.error(f"[Bot] Scan pipeline error: {e}", exc_info=True)
         send_error_alert(f"Scan pipeline error: {type(e).__name__}: {e}")
-        return
+        return False
 
     elapsed = (datetime.now() - start).total_seconds()
     logger.info(
         f"[Bot] V2 scan complete in {elapsed:.1f}s — "
         f"{result.get('messages_sent', 0)} messages sent"
     )
+    return True
 
 
 def main() -> None:
@@ -247,7 +253,9 @@ def main() -> None:
 
     if "--run-now" in sys.argv:
         logger.info("[Bot] --run-now flag detected, executing immediately")
-        run_scan()
+        if not run_scan():
+            # Non-zero exit so CI (GitHub Actions) marks failed scans red.
+            sys.exit(1)
         return
 
     tz = pytz.timezone(TIMEZONE)

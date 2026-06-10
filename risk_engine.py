@@ -169,24 +169,27 @@ def build_trade_plan(data: dict) -> dict | None:
 
         # Resistance-aware R:R: cap the reward leg at the nearest overhead level
         # (52-week high or pivot) so expected_rr reflects realistic upside.
+        # Only levels meaningfully above entry (> 5%) count as real overhead
+        # supply — a level at/near the breakout trigger is being broken, not
+        # resistance. Blue-sky breakouts therefore keep the full target_1 R:R.
         resistance_options = []
         high_52w = _value(data, "high_52w")
         pivot = _value(data, "pivot")
-        if high_52w is not None and high_52w > entry:
+        if high_52w is not None and high_52w > entry * 1.05:
             resistance_options.append(("high_52w", high_52w))
-        if pivot is not None and pivot > entry:
+        if pivot is not None and pivot > entry * 1.05:
             resistance_options.append(("pivot", pivot))
         capped_target_1 = target_1
         rr_resistance_source = None
         if resistance_options:
             resistance_source, resistance = min(resistance_options, key=lambda item: item[1])
             effective_resistance = resistance * 0.98
-            # Floor the cap at entry: if the buffer pulls resistance to/below
-            # entry, there is no usable upside cap — fall back to target_1.
-            if effective_resistance > entry:
-                capped_target_1 = min(target_1, effective_resistance)
-                if capped_target_1 != target_1:
-                    rr_resistance_source = resistance_source
+            # Continuous cap floored at entry: R:R declines smoothly to 0.0 as
+            # price approaches resistance — no fallback cliff. The full 2.5R
+            # fallback applies only when no resistance data exists at all.
+            capped_target_1 = min(target_1, max(effective_resistance, entry))
+            if capped_target_1 != target_1:
+                rr_resistance_source = resistance_source
         actual_rr = round((capped_target_1 - entry) / risk_per_share, 2)
 
         return {

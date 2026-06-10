@@ -769,16 +769,32 @@ def test_missing_ema_and_volume_fields_do_not_crash_and_degrade_safely():
     assert "NO_VOLUME_CONFIRMATION" in result["risk_flags"]
 
 
-def test_risk_reward_between_watchlist_and_entry_threshold_returns_wait():
-    result = evaluate_signal_decision(
+def test_risk_reward_above_watchlist_min_can_enter_and_below_it_avoids():
+    # V3_ENTER_MIN_RR (1.5) sits below V3_WATCHLIST_MIN_RR (2.0), so the
+    # binding R:R constraint for ENTER is the rr-too-weak AVOID gate at 2.0.
+    enter_result = evaluate_signal_decision(
         _signal(trade_plan={"entry": 100.0, "stop_loss": 94.0, "expected_rr": 2.2}),
         market_regime={"is_valid": True, "summary": "Bullish market regime"},
         enabled=True,
     )
 
-    _assert_decision_shape(result)
-    assert result["decision"] == "WAIT"
-    assert any("risk/reward" in warning.lower() for warning in result["risk_warnings"])
+    _assert_decision_shape(enter_result)
+    assert enter_result["decision"] == "ENTER"
+    assert not any(
+        "risk/reward" in warning.lower() for warning in enter_result["risk_warnings"]
+    )
+
+    avoid_result = evaluate_signal_decision(
+        _signal(trade_plan={"entry": 100.0, "stop_loss": 94.0, "expected_rr": 1.7}),
+        market_regime={"is_valid": True, "summary": "Bullish market regime"},
+        enabled=True,
+    )
+
+    _assert_decision_shape(avoid_result)
+    assert avoid_result["decision"] == "AVOID"
+    assert any(
+        "risk/reward" in warning.lower() for warning in avoid_result["risk_warnings"]
+    )
 
 
 def test_excessive_stop_distance_returns_avoid():

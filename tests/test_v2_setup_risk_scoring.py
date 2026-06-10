@@ -90,7 +90,23 @@ def test_trade_plan_uses_breakout_close_stop_below_contraction_low_and_r_targets
     assert plan["risk_per_share"] == 6.47
     assert plan["target_1"] == 116.18
     assert plan["target_2"] == 125.88
+    # high_52w (102) is within the 5% resistance margin of entry (100): it is
+    # the level being broken, not overhead supply — blue-sky R:R applies.
     assert plan["expected_rr"] == 2.5
+    assert plan["rr_capped"] is False
+    assert plan["rr_resistance_source"] is None
+
+
+def test_trade_plan_caps_expected_rr_at_real_overhead_resistance():
+    plan = build_trade_plan(_setup_row(
+        close=100.0, high=101.0, contraction_low=94.0, high_52w=108.0,
+    ))
+
+    # high_52w 8% above entry is real overhead supply: reward is capped at
+    # 108 * 0.98 = 105.84, so rr = (105.84 - 100) / 6.47 = 0.9.
+    assert plan["expected_rr"] == 0.9
+    assert plan["rr_capped"] is True
+    assert plan["rr_resistance_source"] == "high_52w"
     assert plan["position_size"] == "Portfolio size required"
 
 

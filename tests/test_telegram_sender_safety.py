@@ -392,6 +392,48 @@ def test_rollout_check_cli_test_mode_does_not_require_prod_chat_id(monkeypatch, 
     assert "Overall readiness: ready" in output
 
 
+def _scan_result(**overrides) -> dict:
+    result = {
+        "market_regime_valid": True,
+        "market_regime": "Bullish market regime",
+        "messages_sent": 7,
+        "telegram_skipped": False,
+        "trade_signals": 5,
+        "watchlist": 10,
+    }
+    result.update(overrides)
+    return result
+
+
+def test_run_scan_fails_when_zero_messages_delivered_despite_signals(monkeypatch):
+    monkeypatch.setattr(
+        signal_bot, "run_v2_scan", lambda *args, **kwargs: _scan_result(messages_sent=0)
+    )
+
+    assert signal_bot.run_scan() is False
+
+
+def test_run_scan_fails_when_market_summary_send_fails_with_no_signals(monkeypatch):
+    # Even a no-signal day attempts the market summary; zero delivered = failure.
+    monkeypatch.setattr(
+        signal_bot,
+        "run_v2_scan",
+        lambda *args, **kwargs: _scan_result(
+            messages_sent=0, trade_signals=0, watchlist=0
+        ),
+    )
+
+    assert signal_bot.run_scan() is False
+
+
+def test_run_scan_succeeds_when_messages_were_delivered(monkeypatch):
+    monkeypatch.setattr(
+        signal_bot, "run_v2_scan", lambda *args, **kwargs: _scan_result()
+    )
+
+    assert signal_bot.run_scan() is True
+
+
 def test_rollout_check_cli_preview_mode_does_not_require_prod_chat_id(monkeypatch, capsys):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_TARGET_MODE", "preview")

@@ -209,7 +209,8 @@ def run_v3_dry_run_review() -> dict:
 
 
 def run_scan() -> bool:
-    """Run the full EOD pipeline. Returns False when the scan failed.
+    """Run the full EOD pipeline. Returns False when the scan failed or
+    when Telegram delivered zero messages despite having a report to send.
 
     Failures are alerted via Telegram and swallowed here so the scheduler
     daemon survives a bad day; one-off runners (--run-now / CI) use the
@@ -228,10 +229,32 @@ def run_scan() -> bool:
         return False
 
     elapsed = (datetime.now() - start).total_seconds()
+    messages_sent = result.get("messages_sent", 0)
     logger.info(
         f"[Bot] V2 scan complete in {elapsed:.1f}s — "
-        f"{result.get('messages_sent', 0)} messages sent"
+        f"{messages_sent} messages sent"
     )
+
+    # The market summary is always attempted when Telegram is enabled, so a
+    # zero-delivery run means every send failed (wrong target mode, missing
+    # chat id, or API rejections) — regardless of test/prod routing. Fail the
+    # run so CI turns red instead of reporting silent delivery failure.
+    had_report_to_send = (
+        not result.get("telegram_skipped", False)
+        and (
+            result.get("trade_signals", 0) > 0
+            or result.get("watchlist", 0) > 0
+            or "market_regime" in result
+        )
+    )
+    if messages_sent == 0 and had_report_to_send:
+        logger.error(
+            "[CI] Zero messages delivered despite signals present — "
+            f"trade_signals={result.get('trade_signals', 0)} "
+            f"watchlist={result.get('watchlist', 0)} "
+            f"market_regime_valid={result.get('market_regime_valid')}"
+        )
+        return False
     return True
 
 

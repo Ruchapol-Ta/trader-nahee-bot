@@ -153,7 +153,7 @@ def test_invalid_market_regime_stops_before_universe_or_stock_scanning(monkeypat
     monkeypatch.setattr(v2_engine, "screen_universe", fail_screen)
     monkeypatch.setattr(v2_engine, "send_v2_market_summary", fake_market_summary)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert result["market_regime_valid"] is False
     assert calls == {"universe": 0, "screen": 0, "market_summary": 1}
@@ -195,7 +195,7 @@ def test_near_breakout_candidate_is_b_watchlist_only(monkeypatch):
 
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert captured["trade_signals"] == []
     assert len(captured["watchlist"]) == 1
@@ -223,7 +223,7 @@ def test_actual_breakout_can_become_trade_alert_when_score_is_high(monkeypatch):
 
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert len(captured["trade_signals"]) == 1
     assert captured["trade_signals"][0]["grade"] in {"A+", "A"}
@@ -293,7 +293,7 @@ def test_c_and_reject_candidates_are_not_sent_to_telegram(monkeypatch):
     monkeypatch.setattr(v2_engine, "qualify_snapshot", fake_qualify)
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert captured["trade_signals"] == []
     assert captured["watchlist"] == []
@@ -336,7 +336,7 @@ def test_all_qualifying_trade_alerts_are_included_and_ranked_by_score(monkeypatc
 
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert result["market_regime_valid"] is True
     # No daily cap: every qualifying A/A+ breakout is alerted, ranked by score
@@ -373,7 +373,7 @@ def test_v2_scan_reports_filter_funnel_and_reject_aggregation(monkeypatch):
 
     monkeypatch.setattr(v2_engine, "send_v2_report", fake_report)
 
-    result = v2_engine.run_v2_scan()
+    result = v2_engine.run_v2_scan(write_journal=False)
 
     assert result["funnel"]["scanned"] == 4
     assert result["funnel"]["liquidity_passed"] == 4
@@ -412,7 +412,7 @@ def test_debug_mode_collects_top_near_miss_candidates(monkeypatch):
     monkeypatch.setattr(v2_engine, "enrich_with_market_metadata", lambda data, **kwargs: data)
     monkeypatch.setattr(v2_engine, "send_v2_report", lambda *args: 1)
 
-    result = v2_engine.run_v2_scan(debug=True)
+    result = v2_engine.run_v2_scan(debug=True, write_journal=False)
 
     assert result["near_misses"]
     near_miss = result["near_misses"][0]

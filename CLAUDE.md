@@ -209,6 +209,13 @@ tests/test_v3_formatter_compatibility.py
 tests/test_v2_backward_compatibility.py
 ```
 
+## Pending spec amendments
+
+- Task 6 (outcome labeler, not yet built): the fixture-ticker blacklist must
+  NOT contain AAPL — AAPL is in the live scan universe, so blacklisting it
+  drops real outcomes. Use run_id-provenance filtering instead, or keep the
+  blacklist as NEAR/FIRST/SECOND/WATCH only.
+
 ## Commit Discipline
 Before commit:
 

@@ -16,6 +16,10 @@ on:
         options:
           - run-now
           - dry-run-review
+      skip_tests:
+        description: "Emergency bypass of the test gate (use only when a known-flaky failure blocks a needed scan)"
+        type: boolean
+        default: false
 
 # write: the persist-journal step pushes journal history to the journal-data branch.
 permissions:
@@ -43,6 +47,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.lock
+
+      - name: Run test suite (production gate)
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: |
+          python -m pytest tests -q
+          # Guard: tests must not have produced a journal in this workspace —
+          # the persist step later appends that file to durable history.
+          test ! -s data/signal_journal.jsonl
 
       - name: Verify required secret is present
         env:
@@ -117,3 +129,13 @@ jobs:
             data/signal_journal.jsonl
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Telegram alert on failure
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_PROD_CHAT_ID || secrets.TELEGRAM_TEST_CHAT_ID }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="${CHAT}" \
+            -d text="🚨 daily-scan FAILED — run ${{ github.run_id }}. Check Actions logs."

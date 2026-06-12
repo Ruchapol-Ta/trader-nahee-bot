@@ -1,0 +1,45 @@
+name: Tests
+
+# Push-triggered test gate: every commit on any branch runs the hermetic
+# suite. The pip-freeze artifact feeds requirements.lock regeneration when
+# an alert-triggered dependency bump is needed.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run test suite
+        run: python -m pytest tests -q
+
+      - name: Compile check
+        run: python -m compileall . -q
+
+      - name: Capture dependency freeze
+        run: pip freeze > pip-freeze.txt
+
+      - name: Upload pip freeze artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: pip-freeze
+          path: pip-freeze.txt

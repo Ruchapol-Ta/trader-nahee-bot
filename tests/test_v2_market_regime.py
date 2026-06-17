@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -43,3 +44,15 @@ def test_market_regime_reports_each_failed_hard_gate_condition():
     assert "QQQ close <= 50EMA" in result["invalid_reasons"]
     assert "QQQ close <= 200EMA" in result["invalid_reasons"]
     assert "QQQ 50EMA <= 200EMA" in result["invalid_reasons"]
+
+
+def test_market_regime_malformed_numeric_fields_return_invalid_without_raising():
+    result = evaluate_market_regime({
+        "SPY": _market_row(close=math.nan),
+        "QQQ": _market_row(),
+    })
+
+    assert result["is_valid"] is False
+    assert result["score"] == 0
+    assert result["summary"] == "Invalid market regime"
+    assert result["invalid_reasons"] == ["market regime evaluation failed: ValueError"]

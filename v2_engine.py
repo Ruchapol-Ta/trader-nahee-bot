@@ -689,6 +689,33 @@ def run_v2_scan(
                 "[V2] Market regime invalid; skipping universe load and stock scan: "
                 + "; ".join(market_regime.get("invalid_reasons", []))
             )
+            diagnostics = _new_diagnostics()
+            stats = {
+                "scanned": 0,
+                "liquidity_passed": 0,
+                "setup_passed": 0,
+                "grades": {},
+                "trade_signals": 0,
+                "watchlist": 0,
+                "funnel": dict(diagnostics["funnel"]),
+                "reject_reasons": {},
+                "near_misses": [],
+                "top_candidates": [],
+                "market_regime_valid": False,
+                "market_invalid_reasons": market_regime.get("invalid_reasons", []),
+            }
+            journal_enabled = ENABLE_SIGNAL_JOURNAL and write_journal
+            if journal_enabled:
+                run_id = str(uuid4())
+                summary = build_run_summary_record(
+                    run_id=run_id,
+                    trade_signals=[],
+                    watchlist=[],
+                    market_regime=market_regime,
+                    stats=stats,
+                )
+                if journal_run_summary(summary):
+                    logger.info(f"[V3] Journaled invalid-market run summary run_id={run_id}")
             if send_telegram:
                 sent = send_v2_market_summary(market_regime)
             else:
@@ -699,19 +726,12 @@ def run_v2_scan(
                 "market_regime": market_regime.get("summary", "Unknown"),
                 "messages_sent": sent,
                 "telegram_skipped": not send_telegram,
-                "journal_skipped": True,
-                "scanned": 0,
-                "liquidity_passed": 0,
-                "setup_passed": 0,
-                "grades": {},
-                "funnel": _new_diagnostics()["funnel"],
-                "reject_reasons": {},
-                "trade_signals": 0,
-                "watchlist": 0,
+                "journal_skipped": not journal_enabled,
                 "v3_decision_counts": _v3_decision_counts([], []),
                 "v3_blockers": _v3_decision_blockers([], []),
                 "v3_selected_review": _v3_selected_review([], []),
                 "v3_sample_decisions": [],
+                **stats,
             }
 
         _warn_if_intraday_run(market_regime)

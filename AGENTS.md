@@ -1,7 +1,9 @@
 # PROJECT: Signal Bot 🤖
 
 ## Current Status
-Signal Bot is now a Python 3.10+ EOD Telegram trading signal bot with V2 already implemented, committed, and pushed.
+Signal Bot is a Python 3.10+ EOD Telegram trading signal bot. V2 remains the
+base scanner, and the V3 decision layer, JSONL journal, mock position sizing,
+and V3 Telegram formatting are implemented structurally and enabled in config.
 
 V2 is no longer the original EMA 9/21 + RSI-only bot. Do not use the old V1 assumptions as the source of truth.
 
@@ -39,11 +41,18 @@ One-off V2 debug run:
 python signal_bot.py --run-now --debug-v2
 ```
 
+V3 dry-run review and Telegram rollout check:
+
+```bash
+.\.venv-laptop\Scripts\python.exe signal_bot.py --v3-dry-run-review
+.\.venv-laptop\Scripts\python.exe signal_bot.py --telegram-rollout-check
+```
+
 Validation:
 
 ```bash
-python -m pytest tests -v
-python -m compileall .
+.\.venv-laptop\Scripts\python.exe -m pytest tests -v
+.\.venv-laptop\Scripts\python.exe -m compileall .
 ```
 
 ## Current Known Stack
@@ -113,7 +122,7 @@ Decision output should include:
 - next_action
 
 ## Pre-V3 Foundation Requirements
-Before implementing full V3, complete these foundation steps:
+Pre-V3 foundation is complete. Kept for reference:
 
 1. Update project docs so they reflect V2/V3, not old V1 assumptions.
 2. Add V3 config flags.
@@ -124,8 +133,8 @@ Before implementing full V3, complete these foundation steps:
 7. Update Telegram formatter for V3 fields without breaking V2 formatting.
 8. Run:
    ```bash
-   python -m pytest tests -v
-   python -m compileall .
+   .\.venv-laptop\Scripts\python.exe -m pytest tests -v
+   .\.venv-laptop\Scripts\python.exe -m compileall .
    ```
 
 ## Implementation Rules
@@ -141,15 +150,18 @@ Before implementing full V3, complete these foundation steps:
 - Preserve Telegram sending behavior.
 - Keep live Telegram sends limited during testing.
 - Use pytest and compileall before commit.
+- Do not loosen V3 decision thresholds as part of ops or docs work.
+- Remaining rollout work is durable journal history, safe rollout validation,
+  and decision calibration from multiple journaled market days.
 
-## Suggested V3 Config Flags
-Add to `config.py` or the existing config location:
+## V3 Config Flags
+Implemented in `config.py`:
 
 ```python
-ENABLE_V3_DECISION_LAYER = False
+ENABLE_V3_DECISION_LAYER = True
 ENABLE_SIGNAL_JOURNAL = True
-ENABLE_POSITION_SIZING = False
-ENABLE_V3_TELEGRAM_FORMAT = False
+ENABLE_POSITION_SIZING = True
+ENABLE_V3_TELEGRAM_FORMAT = True
 
 JOURNAL_PATH = "data/signal_journal.jsonl"
 
@@ -157,21 +169,23 @@ MOCK_PORTFOLIO_SIZE = 10000.0
 DEFAULT_RISK_PER_TRADE_PCT = 0.01
 
 RISK_MODE_CONSERVATIVE_PCT = 0.005
+RISK_MODE_TINY_PCT = 0.0025
+RISK_MODE_SMALL_PCT = 0.005
 RISK_MODE_NORMAL_PCT = 0.01
 RISK_MODE_AGGRESSIVE_PCT = 0.02
 ```
 
-## Suggested Pre-V3 Modules
-Add only if they do not already exist:
+## Pre-V3 Modules
+Implemented:
 
 ```text
 journal.py             # JSONL signal/run storage
-decision_engine.py     # ENTER/WAIT/WATCHLIST_ONLY/AVOID skeleton
+decision_engine.py     # ENTER/WAIT/WATCHLIST_ONLY/AVOID decisions
 position_sizing.py     # mock portfolio sizing calculation
 ```
 
 ## Testing Expectations
-Add or update tests for:
+Tests exist for:
 
 ```text
 tests/test_journal.py
@@ -185,15 +199,15 @@ tests/test_v2_backward_compatibility.py
 Before commit:
 
 ```bash
-python -m pytest tests -v
-python -m compileall .
+.\.venv-laptop\Scripts\python.exe -m pytest tests -v
+.\.venv-laptop\Scripts\python.exe -m compileall .
 git status
 ```
 
 Recommended commit message:
 
 ```bash
-feat: add pre-v3 trade decision foundation
+chore: harden v3 journal pipeline docs
 ```
 
 Do not push unless explicitly requested.

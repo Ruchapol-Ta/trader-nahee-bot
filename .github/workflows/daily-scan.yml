@@ -66,6 +66,7 @@ jobs:
           fi
 
       - name: Run EOD scan
+        id: eod_scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           # Defaults to 'test' if the secret is unset, so CI never accidentally hits prod.
@@ -84,10 +85,11 @@ jobs:
           fi
 
       - name: Persist journal to journal-data branch
-        # Skipped when the scan step failed (default step success check) and on
-        # manual dry-run-review runs (which never write a journal anyway).
+        # Runs after any completed run-now scan, even when the scan step failed
+        # after producing a journal breadcrumb. Skips tests/secret/setup failures
+        # where the scan never ran and skips manual dry-run-review runs.
         # Scheduled runs have no inputs -> mode defaults to run-now -> persists.
-        if: ${{ (github.event.inputs.mode || 'run-now') == 'run-now' }}
+        if: ${{ always() && steps.eod_scan.conclusion != 'skipped' && (github.event.inputs.mode || 'run-now') == 'run-now' }}
         run: |
           set -e
           if [ ! -s data/signal_journal.jsonl ]; then

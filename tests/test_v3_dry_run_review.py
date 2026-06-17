@@ -513,15 +513,20 @@ def test_run_v2_scan_dry_run_skips_market_summary_when_market_invalid(monkeypatc
     def fail_universe(*args, **kwargs):
         raise AssertionError("invalid market should not scan the universe")
 
+    def fail_journal_run_summary(*args, **kwargs):
+        raise AssertionError("dry-run review must not call journal_run_summary")
+
     monkeypatch.setattr(v2_engine, "send_v2_market_summary", fail_market_summary)
     monkeypatch.setattr(v2_engine, "get_v2_universe", fail_universe)
+    monkeypatch.setattr(v2_engine, "journal_run_summary", fail_journal_run_summary)
 
-    result = v2_engine.run_v2_scan(send_telegram=False)
+    result = v2_engine.run_v2_scan(send_telegram=False, write_journal=False)
 
     assert result["market_regime_valid"] is False
     assert result["market_regime"] == "Invalid market"
     assert result["messages_sent"] == 0
     assert result["telegram_skipped"] is True
+    assert result["journal_skipped"] is True
     assert result["v3_decision_counts"] == {
         "ENTER": 0,
         "WAIT": 0,
@@ -529,6 +534,58 @@ def test_run_v2_scan_dry_run_skips_market_summary_when_market_invalid(monkeypatc
         "AVOID": 0,
         "none": 0,
     }
+
+
+def test_run_v2_scan_journals_invalid_market_summary_before_return(monkeypatch):
+    journaled = []
+    market_regime = _regime(
+        is_valid=False,
+        summary="Invalid market regime",
+        invalid_reasons=["SPY market data unavailable", "QQQ market data unavailable"],
+        market_data={},
+    )
+    monkeypatch.setattr(v2_engine, "ENABLE_SIGNAL_JOURNAL", True)
+    monkeypatch.setattr(v2_engine, "load_market_regime", lambda: market_regime)
+    monkeypatch.setattr(v2_engine, "send_v2_market_summary", lambda market_regime: 1)
+
+    def fail_universe(*args, **kwargs):
+        raise AssertionError("invalid market should not scan the universe")
+
+    def fail_journal_signals(*args, **kwargs):
+        raise AssertionError("invalid market has no selected signals to journal")
+
+    def fake_journal_run_summary(summary):
+        journaled.append(summary)
+        return True
+
+    monkeypatch.setattr(v2_engine, "get_v2_universe", fail_universe)
+    monkeypatch.setattr(v2_engine, "journal_signals", fail_journal_signals)
+    monkeypatch.setattr(v2_engine, "journal_run_summary", fake_journal_run_summary)
+
+    result = v2_engine.run_v2_scan()
+
+    assert result["market_regime_valid"] is False
+    assert result["messages_sent"] == 1
+    assert result["journal_skipped"] is False
+    assert result["scanned"] == 0
+    assert result["trade_signals"] == 0
+    assert result["watchlist"] == 0
+    assert result["market_invalid_reasons"] == [
+        "SPY market data unavailable",
+        "QQQ market data unavailable",
+    ]
+    assert len(journaled) == 1
+    summary = journaled[0]
+    assert summary["record_type"] == "run_summary"
+    assert summary["market_regime"] == "Invalid market regime"
+    assert summary["final_selected_count"] == 0
+    assert summary["stats"]["scanned"] == 0
+    assert summary["stats"]["market_regime_valid"] is False
+    assert summary["stats"]["market_invalid_reasons"] == [
+        "SPY market data unavailable",
+        "QQQ market data unavailable",
+    ]
+    assert summary["data_freshness"]["market"] == {}
 
 
 def test_v3_dry_run_cli_returns_early_without_scheduler_or_telegram(monkeypatch, capsys):

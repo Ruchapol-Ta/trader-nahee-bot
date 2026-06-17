@@ -1,7 +1,7 @@
 # PROJECT: Signal Bot 🤖
 
 ## Current Status
-Signal Bot is a Python 3.10+ EOD Telegram trading signal bot. V2 plus the V3 decision layer are implemented and **live in production**: a GitHub Actions workflow (`.github/workflows/daily-scan.yml`, cron 21:30 UTC Mon–Fri) runs `python signal_bot.py --run-now`. The Telegram target mode in CI comes from the `TELEGRAM_TARGET_MODE` repo secret (workflow defaults to `test` if the secret is unset); prod has been enabled with user confirmation.
+Signal Bot is a Python 3.10+ EOD Telegram trading signal bot. V2 plus the V3 decision layer are implemented structurally. A GitHub Actions workflow (`.github/workflows/daily-scan.yml`, cron 21:30 UTC Mon–Fri) runs `python signal_bot.py --run-now`. The Telegram target mode in CI comes from the `TELEGRAM_TARGET_MODE` repo secret (workflow defaults to `test` if the secret is unset); verify the active mode with `--telegram-rollout-check` before any rollout change.
 
 V2 is no longer the original EMA 9/21 + RSI-only bot. Do not use the old V1 assumptions as the source of truth.
 
@@ -49,8 +49,8 @@ python signal_bot.py --telegram-rollout-check
 Validation:
 
 ```bash
-python -m pytest tests -v
-python -m compileall .
+.\.venv-laptop\Scripts\python.exe -m pytest tests -v
+.\.venv-laptop\Scripts\python.exe -m compileall .
 ```
 
 ## Current Known Stack
@@ -99,15 +99,25 @@ smoke_test.py
 Both original items are resolved:
 
 1. **`risk_engine.py` — R:R calculation hardcoded at 2.5** — ✅ RESOLVED: `expected_rr` is resistance-aware (capped at the nearest of `high_52w`/`pivot` × 0.98, floored at entry). `scoring.py` `risk_reward` is graduated on `expected_rr`: ≥2.0→10pts, ≥1.5→6pts, ≥1.0→3pts, <1.0→0pts.
-2. **`TELEGRAM_TARGET_MODE`** — ✅ RESOLVED: prod is live. Local `.env` is `prod`; CI mode comes from the `TELEGRAM_TARGET_MODE` repo secret (defaults to `test` when unset). Do not change the mode without explicit user confirmation.
+2. **`TELEGRAM_TARGET_MODE`** — ✅ RESOLVED: target-mode routing is explicit. CI mode comes from the `TELEGRAM_TARGET_MODE` repo secret (defaults to `test` when unset). Do not change the mode without explicit user confirmation.
+
+Current remaining work:
+
+- Keep the durable `journal-data` history path healthy and reviewable.
+- Review V3 blocker patterns across multiple market days before changing any
+  decision thresholds.
+- Keep rollout changes limited to safe dry-run and checklist paths unless the
+  user explicitly approves live sends.
 
 ## Known Issues / Quirks
 
 - R:R (`expected_rr`) is resistance-aware in `risk_engine.py` (capped at nearest of `high_52w`/`pivot` × 0.98, floored at entry); `scoring.py` `risk_reward` is graduated on it (≥2.0→10, ≥1.5→6, ≥1.0→3, <1.0→0) — was hardcoded at 2.5
-- `TELEGRAM_TARGET_MODE` is **prod** (live alerts). `test`/`preview` route to the test chat; CI mode is controlled by the `TELEGRAM_TARGET_MODE` repo secret
+- `TELEGRAM_TARGET_MODE` is environment-controlled. `test`/`preview` route to the test chat; explicit `prod` requires the prod chat id; CI mode is controlled by the `TELEGRAM_TARGET_MODE` repo secret
 - `--run-now` exits with code 1 when the scan pipeline fails, so GitHub Actions marks failed runs red; the scheduler-daemon path still swallows failures after sending a Telegram error alert
 - Runs before 16:00 ET with a same-day SPY bar log `[Warning] Intraday run detected` — volume data is partial on such runs; the 21:30 UTC scheduled run is safe
-- The signal journal on GitHub Actions is ephemeral: `data/signal_journal.jsonl` survives only as a per-run artifact (14-day retention); there is no durable journal history yet
+- GitHub Actions persists `data/signal_journal.jsonl` to the `journal-data`
+  branch after `run-now` scans, including scans that fail after producing a
+  journal breadcrumb; artifacts are still uploaded for 14-day debugging
 
 ## V3 Goal
 V3 should upgrade the bot from a Signal Alert Bot into a Trade Decision Assistant.
@@ -146,8 +156,8 @@ Decision output should include:
 7. Update Telegram formatter for V3 fields without breaking V2 formatting.
 8. Run:
    ```bash
-   python -m pytest tests -v
-   python -m compileall .
+   .\.venv-laptop\Scripts\python.exe -m pytest tests -v
+   .\.venv-laptop\Scripts\python.exe -m compileall .
    ```
 
 ## Implementation Rules
@@ -165,7 +175,7 @@ Decision output should include:
 - Use pytest and compileall before commit.
 
 ## Hard Rules
-- **Do NOT change `TELEGRAM_TARGET_MODE`** (currently `prod` — live alerts) without explicit user confirmation; the same applies to the CI `TELEGRAM_TARGET_MODE` repo secret.
+- **Do NOT change `TELEGRAM_TARGET_MODE`** without explicit user confirmation; the same applies to the CI `TELEGRAM_TARGET_MODE` repo secret.
 - **Always run `pytest` + `compileall` before any commit**.
 - **Do NOT delete V1 modules** unless explicitly requested.
 - **Do NOT push** unless explicitly requested.
@@ -220,15 +230,15 @@ tests/test_v2_backward_compatibility.py
 Before commit:
 
 ```bash
-python -m pytest tests -v
-python -m compileall .
+.\.venv-laptop\Scripts\python.exe -m pytest tests -v
+.\.venv-laptop\Scripts\python.exe -m compileall .
 git status
 ```
 
 Recommended commit message:
 
 ```bash
-feat: add pre-v3 trade decision foundation
+chore: harden v3 journal pipeline docs
 ```
 
 Do not push unless explicitly requested.

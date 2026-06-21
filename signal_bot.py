@@ -82,6 +82,25 @@ def _format_v3_blockers(values: dict | None) -> list[str]:
     return [f"- {key}: {values.get(key, 0)}" for key in values]
 
 
+def _format_vcp_shadow(values: dict | None) -> list[str]:
+    if not values:
+        return ["- comparison unavailable"]
+    return [
+        f"- agreement: {_format_key_counts(values.get('agreement_counts'))}",
+        (
+            "- pass counts: "
+            f"current {values.get('current_logic_passed', 0)} | "
+            f"new {values.get('new_engine_passed', 0)} | "
+            f"2+ contractions {values.get('new_engine_contractions_2plus', 0)} | "
+            f"3+ contractions {values.get('new_engine_contractions_3plus', 0)} | "
+            f"pivots {values.get('new_engine_pivot_identified', 0)} | "
+            f"extended {values.get('new_engine_extended', 0)}"
+        ),
+        f"- new reject reasons: {_format_key_counts(values.get('new_engine_reject_reasons'), limit=5)}",
+        f"- new warning flags: {_format_key_counts(values.get('new_engine_warning_flags'), limit=5)}",
+    ]
+
+
 def _format_score(value: object) -> str:
     try:
         number = float(value)
@@ -153,6 +172,8 @@ def format_v3_dry_run_review(result: dict) -> str:
         ),
         f"V2 funnel: {_format_key_counts(result.get('funnel'))}",
         f"Reject aggregation: {_format_key_counts(result.get('reject_reasons'), limit=5)}",
+        "VCP shadow comparison:",
+        *_format_vcp_shadow(result.get("vcp_shadow")),
         f"V3 decisions: {_format_decision_counts(result.get('v3_decision_counts') or {})}",
         f"Telegram delivery: {'skipped' if result.get('telegram_skipped') else 'enabled'}",
         f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",

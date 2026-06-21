@@ -475,6 +475,53 @@ def test_format_v3_dry_run_review_maps_wait_volume_subtype_label():
     assert "WAIT_VOLUME_CONFIRMATION" not in output
 
 
+def test_format_v3_dry_run_review_includes_vcp_shadow_comparison():
+    output = signal_bot.format_v3_dry_run_review({
+        "market_regime": "Bullish market regime",
+        "market_regime_valid": True,
+        "scanned": 10,
+        "trade_signals": 1,
+        "watchlist": 1,
+        "funnel": {"scanned": 10, "final_setup_passed": 2},
+        "reject_reasons": {},
+        "vcp_shadow": {
+            "agreement_counts": {"both_passed": 2, "current_only": 3, "both_failed": 5},
+            "current_logic_passed": 5,
+            "new_engine_passed": 2,
+            "new_engine_contractions_2plus": 4,
+            "new_engine_contractions_3plus": 2,
+            "new_engine_pivot_identified": 6,
+            "new_engine_extended": 1,
+            "new_engine_reject_reasons": {
+                "prior uptrend not confirmed": 3,
+                "final contraction depth 18.0% > 12%": 2,
+            },
+            "new_engine_warning_flags": {
+                "preferred_contractions_missing": 2,
+                "final_contraction_volume_not_dry": 1,
+            },
+        },
+        "v3_decision_counts": {
+            "ENTER": 0,
+            "WAIT": 2,
+            "WATCHLIST_ONLY": 0,
+            "AVOID": 0,
+            "none": 0,
+        },
+        "telegram_skipped": True,
+        "journal_skipped": True,
+        "v3_blockers": {},
+        "v3_selected_review": [],
+        "v3_sample_decisions": [],
+    })
+
+    assert "VCP shadow comparison:" in output
+    assert "- agreement: both_failed: 5 | current_only: 3 | both_passed: 2" in output
+    assert "- pass counts: current 5 | new 2 | 2+ contractions 4 | 3+ contractions 2 | pivots 6 | extended 1" in output
+    assert "prior uptrend not confirmed: 3" in output
+    assert "preferred_contractions_missing: 2" in output
+
+
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):
     _patch_liquidity_reject_scan(monkeypatch)
 

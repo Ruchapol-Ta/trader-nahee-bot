@@ -78,6 +78,18 @@ def _new_diagnostics(scanned: int = 0) -> dict:
         },
         "reject_reasons": Counter(),
         "near_misses": [],
+        "vcp_shadow": {
+            "agreement_counts": Counter(),
+            "current_logic_passed": 0,
+            "new_engine_passed": 0,
+            "new_engine_contractions_2plus": 0,
+            "new_engine_contractions_3plus": 0,
+            "new_engine_pivot_identified": 0,
+            "new_engine_extended": 0,
+            "new_engine_volume_dry_up": 0,
+            "new_engine_reject_reasons": Counter(),
+            "new_engine_warning_flags": Counter(),
+        },
     }
 
 
@@ -142,6 +154,64 @@ def _record_setup_funnel(diagnostics: dict | None, relative_strength: dict, setu
         funnel["volume_dry_up_passed"] += 1
     if checks.get("breakout"):
         funnel["breakout_passed"] += 1
+
+
+def _record_vcp_shadow_diagnostics(diagnostics: dict | None, setup: dict) -> None:
+    """Record comparison stats for current VCP logic vs the shadow engine."""
+    if diagnostics is None:
+        return
+    shadow = diagnostics.get("vcp_shadow")
+    if not isinstance(shadow, dict):
+        return
+    comparison = setup.get("vcp_engine_comparison")
+    comparison = comparison if isinstance(comparison, dict) else {}
+    new_engine = setup.get("new_vcp_engine")
+    new_engine = new_engine if isinstance(new_engine, dict) else {}
+
+    agreement = comparison.get("agreement") or "unknown"
+    shadow["agreement_counts"][agreement] += 1
+    if comparison.get("current_vcp_logic_passed"):
+        shadow["current_logic_passed"] += 1
+    if comparison.get("new_vcp_engine_passed"):
+        shadow["new_engine_passed"] += 1
+    contraction_count = int(new_engine.get("contraction_count") or 0)
+    if contraction_count >= 2:
+        shadow["new_engine_contractions_2plus"] += 1
+    if contraction_count >= 3:
+        shadow["new_engine_contractions_3plus"] += 1
+    if new_engine.get("pivot_price") is not None:
+        shadow["new_engine_pivot_identified"] += 1
+    if new_engine.get("is_extended"):
+        shadow["new_engine_extended"] += 1
+    volume_ratio = new_engine.get("volume_dry_up_ratio")
+    try:
+        if volume_ratio is not None and float(volume_ratio) <= 0.80:
+            shadow["new_engine_volume_dry_up"] += 1
+    except (TypeError, ValueError):
+        pass
+    for reason in new_engine.get("reject_reasons") or []:
+        shadow["new_engine_reject_reasons"][str(reason)] += 1
+    for flag in new_engine.get("warning_flags") or []:
+        shadow["new_engine_warning_flags"][str(flag)] += 1
+
+
+def _vcp_shadow_summary(diagnostics: dict | None) -> dict:
+    """Return JSON-friendly VCP shadow diagnostics."""
+    shadow = diagnostics.get("vcp_shadow") if isinstance(diagnostics, dict) else None
+    if not isinstance(shadow, dict):
+        return {}
+    return {
+        "agreement_counts": dict(shadow["agreement_counts"]),
+        "current_logic_passed": shadow["current_logic_passed"],
+        "new_engine_passed": shadow["new_engine_passed"],
+        "new_engine_contractions_2plus": shadow["new_engine_contractions_2plus"],
+        "new_engine_contractions_3plus": shadow["new_engine_contractions_3plus"],
+        "new_engine_pivot_identified": shadow["new_engine_pivot_identified"],
+        "new_engine_extended": shadow["new_engine_extended"],
+        "new_engine_volume_dry_up": shadow["new_engine_volume_dry_up"],
+        "new_engine_reject_reasons": dict(shadow["new_engine_reject_reasons"]),
+        "new_engine_warning_flags": dict(shadow["new_engine_warning_flags"]),
+    }
 
 
 def _ratio_or_zero(numerator: float | None, denominator: float | None) -> float:
@@ -212,6 +282,22 @@ def _log_diagnostics(diagnostics: dict, debug: bool) -> None:
         "[V2] Reject aggregation: "
         + (" ".join(f"{key}={value}" for key, value in sorted(reject_reasons.items())) or "none")
     )
+    vcp_shadow = _vcp_shadow_summary(diagnostics)
+    if vcp_shadow:
+        logger.info(
+            "[VCP Shadow] Agreement: "
+            + (
+                " ".join(
+                    f"{key}={value}"
+                    for key, value in sorted(vcp_shadow["agreement_counts"].items())
+                )
+                or "none"
+            )
+            + " "
+            f"current_passed={vcp_shadow['current_logic_passed']} "
+            f"new_passed={vcp_shadow['new_engine_passed']} "
+            f"pivot_identified={vcp_shadow['new_engine_pivot_identified']}"
+        )
     if not debug:
         return
     near_misses = sorted(
@@ -572,6 +658,7 @@ def qualify_snapshot(
         setup = evaluate_vcp_setup(enriched)
         trade_plan = build_trade_plan(enriched)
         _record_setup_funnel(diagnostics, relative_strength, setup)
+        _record_vcp_shadow_diagnostics(diagnostics, setup)
 
         reject_reasons: list[str] = []
         reject_reasons.extend(relative_strength.get("reject_reasons", []))
@@ -626,6 +713,9 @@ def qualify_snapshot(
             "grade": grade,
             "raw_score": score.get("raw_score", score["score"]),
             "category_scores": score["category_scores"],
+            "current_vcp_logic": setup.get("current_vcp_logic"),
+            "new_vcp_engine": setup.get("new_vcp_engine"),
+            "vcp_engine_comparison": setup.get("vcp_engine_comparison"),
             "is_actual_breakout": bool(setup.get("checks", {}).get("breakout")),
             "is_near_breakout": bool(setup.get("checks", {}).get("near_breakout")),
             "pass_reasons": pass_reasons[:4],
@@ -699,6 +789,7 @@ def run_v2_scan(
                 "watchlist": 0,
                 "funnel": dict(diagnostics["funnel"]),
                 "reject_reasons": {},
+                "vcp_shadow": _vcp_shadow_summary(diagnostics),
                 "near_misses": [],
                 "top_candidates": [],
                 "market_regime_valid": False,
@@ -805,6 +896,15 @@ def run_v2_scan(
                 "score": item.get("score"),
                 "actual_breakout": bool(item.get("is_actual_breakout")),
                 "near_breakout": bool(item.get("is_near_breakout")),
+                "new_vcp_engine_passed": bool(
+                    (item.get("new_vcp_engine") or {}).get("passed")
+                ),
+                "new_vcp_contraction_count": (
+                    item.get("new_vcp_engine") or {}
+                ).get("contraction_count"),
+                "new_vcp_pivot_status": (
+                    item.get("new_vcp_engine") or {}
+                ).get("pivot_status"),
             }
             for item in qualified
             if item.get("grade") in {"A+", "A", "B"}
@@ -818,6 +918,7 @@ def run_v2_scan(
             "watchlist": len(watchlist),
             "funnel": dict(diagnostics["funnel"]),
             "reject_reasons": dict(diagnostics["reject_reasons"]),
+            "vcp_shadow": _vcp_shadow_summary(diagnostics),
             "near_misses": near_misses,
             "top_candidates": top_candidates,
         }
@@ -858,6 +959,7 @@ def run_v2_scan(
             "journal_skipped": not (ENABLE_SIGNAL_JOURNAL and write_journal),
             "funnel": stats["funnel"],
             "reject_reasons": stats["reject_reasons"],
+            "vcp_shadow": stats["vcp_shadow"],
             "near_misses": near_misses,
             "v3_decision_counts": v3_decision_counts,
             "v3_blockers": v3_blockers,

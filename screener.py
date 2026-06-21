@@ -23,6 +23,7 @@ from config import (
     TREND_TEMPLATE_SMA_LONG, TREND_TEMPLATE_SMA200_RISING_LOOKBACK,
     VCP_CONTRACTION_LOOKBACK_SHORT,
     VCP_CONTRACTION_LOOKBACK_MID, VCP_CONTRACTION_LOOKBACK_LONG,
+    VCP_HISTORY_LOOKBACK_DAYS,
     VCP_PIVOT_LOOKBACK,
 )
 from yfinance_cache import configure_yfinance_cache
@@ -218,6 +219,39 @@ def _window_extreme(
     return number
 
 
+def _series_tail_values(series: pd.Series, lookback: int) -> list[float | None]:
+    """Return a JSON-safe numeric tail while preserving row alignment."""
+    values: list[float | None] = []
+    for value in series.iloc[-lookback:]:
+        number = _finite_or_none(value)
+        values.append(round(number, 6) if number is not None else None)
+    return values
+
+
+def _series_tail_dates(series: pd.Series, lookback: int) -> list[str]:
+    """Return string dates aligned with a tail of a price series."""
+    dates: list[str] = []
+    for index_value in series.index[-lookback:]:
+        dates.append(
+            index_value.date().isoformat()
+            if hasattr(index_value, "date")
+            else str(index_value)
+        )
+    return dates
+
+
+def _price_history(series: dict, lookback: int) -> dict:
+    """Build bounded OHLCV history for shadow VCP diagnostics."""
+    close = series["close"]
+    return {
+        "dates": _series_tail_dates(close, lookback),
+        "high": _series_tail_values(series["high"], lookback),
+        "low": _series_tail_values(series["low"], lookback),
+        "close": _series_tail_values(close, lookback),
+        "volume": _series_tail_values(series["volume"], lookback),
+    }
+
+
 def latest_snapshot(ticker: str, series: dict) -> dict | None:
     """Collapse a series dict into a single-row snapshot for the latest bar."""
     try:
@@ -232,6 +266,7 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
         if prev_close == 0:
             return None
         avg_volume = float(volume.iloc[-VOLUME_WINDOW:].mean())
+        avg_volume_50 = float(volume.iloc[-50:].mean())
         dollar_volume = close * volume
         latest_index = close.index[-1]
         latest_bar_date = (
@@ -311,6 +346,7 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "rsi": float(series["rsi"].iloc[-1]),
             "volume": float(volume.iloc[-1]),
             "avg_volume": avg_volume,
+            "avg_volume_50": avg_volume_50,
             "vol_sma20": float(series["vol_sma20"].iloc[-1]),
             "swing_low_5": float(low.iloc[-SL_SWING_LOOKBACK:].min()),
             "avg_dollar_volume": float(dollar_volume.iloc[-VOLUME_WINDOW:].mean()),
@@ -333,6 +369,7 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "contraction_low": float(
                 low.iloc[-VCP_CONTRACTION_LOOKBACK_MID:].min()
             ),
+            "_history": _price_history(series, VCP_HISTORY_LOOKBACK_DAYS),
             "data_quality_flags": data_quality_flags,
             "missing_data_reasons": missing_reasons,
         }

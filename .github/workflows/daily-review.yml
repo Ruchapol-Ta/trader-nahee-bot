@@ -1,0 +1,82 @@
+name: Daily Research Review
+
+# Research-only dry-run review after the production EOD workflow window.
+# GitHub Actions cron is UTC: 22:15 UTC = 05:15 Asia/Bangkok next day.
+on:
+  schedule:
+    - cron: "15 22 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-research-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Guard against local env files
+        run: |
+          if [ -e .env ] || [ -e .env.local ]; then
+            echo "::error::.env or .env.local must not be present in the CI workspace"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.lock ]; then
+            pip install -r requirements.lock
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "::error::No requirements.lock or requirements.txt found"
+            exit 1
+          fi
+
+      - name: Run dry-run review guard tests
+        run: python -m pytest tests/test_v3_dry_run_review.py -q
+
+      - name: Generate research review
+        run: python signal_bot.py --v3-dry-run-review
+
+      - name: Verify review reports exist
+        run: |
+          if [ ! -d reports/daily_review ]; then
+            echo "::error::reports/daily_review was not created"
+            exit 1
+          fi
+          if ! ls reports/daily_review/*.csv >/dev/null 2>&1; then
+            echo "::error::No CSV review report was generated"
+            exit 1
+          fi
+          if ! ls reports/daily_review/*.json >/dev/null 2>&1; then
+            echo "::error::No JSON review report was generated"
+            exit 1
+          fi
+
+      - name: Upload review reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: daily-research-review-${{ github.run_id }}
+          path: |
+            reports/daily_review/*.csv
+            reports/daily_review/*.json
+          if-no-files-found: warn
+          retention-days: 30

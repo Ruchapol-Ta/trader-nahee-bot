@@ -87,6 +87,10 @@ def _new_diagnostics(scanned: int = 0) -> dict:
             "new_engine_pivot_identified": 0,
             "new_engine_extended": 0,
             "new_engine_volume_dry_up": 0,
+            "shadow_quality_grades": Counter(),
+            "shadow_quality_score_buckets": Counter(),
+            "shadow_quality_score_total": 0,
+            "shadow_quality_score_count": 0,
             "new_engine_reject_reasons": Counter(),
             "new_engine_warning_flags": Counter(),
         },
@@ -189,6 +193,28 @@ def _record_vcp_shadow_diagnostics(diagnostics: dict | None, setup: dict) -> Non
             shadow["new_engine_volume_dry_up"] += 1
     except (TypeError, ValueError):
         pass
+    quality_score = new_engine.get("shadow_vcp_quality_score")
+    try:
+        if quality_score is not None:
+            quality_score = int(float(quality_score))
+            shadow["shadow_quality_score_total"] += quality_score
+            shadow["shadow_quality_score_count"] += 1
+            if quality_score >= 90:
+                bucket = "90-100"
+            elif quality_score >= 80:
+                bucket = "80-89"
+            elif quality_score >= 70:
+                bucket = "70-79"
+            elif quality_score >= 60:
+                bucket = "60-69"
+            else:
+                bucket = "0-59"
+            shadow["shadow_quality_score_buckets"][bucket] += 1
+    except (TypeError, ValueError):
+        pass
+    quality_grade = new_engine.get("shadow_vcp_quality_grade")
+    if quality_grade:
+        shadow["shadow_quality_grades"][str(quality_grade)] += 1
     for reason in new_engine.get("reject_reasons") or []:
         shadow["new_engine_reject_reasons"][str(reason)] += 1
     for flag in new_engine.get("warning_flags") or []:
@@ -200,6 +226,12 @@ def _vcp_shadow_summary(diagnostics: dict | None) -> dict:
     shadow = diagnostics.get("vcp_shadow") if isinstance(diagnostics, dict) else None
     if not isinstance(shadow, dict):
         return {}
+    score_count = shadow["shadow_quality_score_count"]
+    average_score = (
+        round(shadow["shadow_quality_score_total"] / score_count, 1)
+        if score_count
+        else None
+    )
     return {
         "agreement_counts": dict(shadow["agreement_counts"]),
         "current_logic_passed": shadow["current_logic_passed"],
@@ -209,6 +241,9 @@ def _vcp_shadow_summary(diagnostics: dict | None) -> dict:
         "new_engine_pivot_identified": shadow["new_engine_pivot_identified"],
         "new_engine_extended": shadow["new_engine_extended"],
         "new_engine_volume_dry_up": shadow["new_engine_volume_dry_up"],
+        "shadow_quality_grades": dict(shadow["shadow_quality_grades"]),
+        "shadow_quality_score_buckets": dict(shadow["shadow_quality_score_buckets"]),
+        "shadow_quality_average": average_score,
         "new_engine_reject_reasons": dict(shadow["new_engine_reject_reasons"]),
         "new_engine_warning_flags": dict(shadow["new_engine_warning_flags"]),
     }
@@ -905,6 +940,12 @@ def run_v2_scan(
                 "new_vcp_pivot_status": (
                     item.get("new_vcp_engine") or {}
                 ).get("pivot_status"),
+                "shadow_vcp_quality_score": (
+                    item.get("new_vcp_engine") or {}
+                ).get("shadow_vcp_quality_score"),
+                "shadow_vcp_quality_grade": (
+                    item.get("new_vcp_engine") or {}
+                ).get("shadow_vcp_quality_grade"),
             }
             for item in qualified
             if item.get("grade") in {"A+", "A", "B"}

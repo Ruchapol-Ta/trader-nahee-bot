@@ -145,6 +145,17 @@ def _one_day_spike_history() -> dict:
     return history
 
 
+def _loose_quality_history() -> dict:
+    return _history_from_points([
+        (0, 50.0),
+        (80, 100.0),
+        (95, 68.0),
+        (112, 95.0),
+        (124, 82.0),
+        (145, 94.0),
+    ])
+
+
 def _legacy_setup_row(**overrides):
     data = {
         "ticker": "TEST",
@@ -294,3 +305,85 @@ def test_v2_diagnostics_compare_current_logic_to_new_engine(monkeypatch):
     assert summary["new_engine_passed"] == 1
     assert summary["new_engine_contractions_3plus"] == 1
     assert summary["new_engine_pivot_identified"] == 1
+    assert candidate["new_vcp_engine"]["shadow_vcp_quality_score"] >= 90
+    assert candidate["new_vcp_engine"]["shadow_vcp_quality_grade"] == "Elite"
+    assert summary["shadow_quality_grades"]["Elite"] == 1
+    assert summary["shadow_quality_score_buckets"]["90-100"] == 1
+    assert summary["shadow_quality_average"] >= 90
+
+
+def test_elite_vcp_structure_scores_90_plus():
+    result = evaluate_new_vcp_engine(_legacy_setup_row(close=97.0, _history=_valid_three_contraction_history()))
+
+    assert result["passed"] is True
+    assert result["shadow_vcp_quality_score"] >= 90
+    assert result["shadow_vcp_quality_grade"] == "Elite"
+    assert result["vcp_quality_score"] == result["shadow_vcp_quality_score"]
+    assert set(result["shadow_vcp_quality_components"]) == {
+        "prior_uptrend_quality",
+        "base_depth_quality",
+        "base_duration_quality",
+        "contraction_count_quality",
+        "tightening_quality",
+        "final_contraction_quality",
+        "pivot_quality",
+        "extension_penalty",
+    }
+
+
+def test_strong_vcp_structure_scores_80_to_89():
+    result = evaluate_new_vcp_engine(_legacy_setup_row(close=97.0, _history=_valid_two_contraction_history()))
+
+    assert result["passed"] is True
+    assert 80 <= result["shadow_vcp_quality_score"] <= 89
+    assert result["shadow_vcp_quality_grade"] == "Strong"
+
+
+def test_weak_loose_structure_scores_below_70():
+    result = evaluate_new_vcp_engine(_legacy_setup_row(close=88.0, _history=_loose_quality_history()))
+
+    assert result["shadow_vcp_quality_score"] < 70
+    assert result["shadow_vcp_quality_grade"] in {"Weak", "Poor"}
+    assert result["shadow_vcp_quality_components"]["base_depth_quality"] < 10
+
+
+def test_failed_no_pivot_structure_scores_low():
+    result = evaluate_new_vcp_engine(_legacy_setup_row(close=100.0, _history=_random_chop_history()))
+
+    assert result["passed"] is False
+    assert result["pivot_price"] is None
+    assert result["shadow_vcp_quality_score"] < 60
+    assert result["shadow_vcp_quality_grade"] == "Poor"
+    assert any("no identifiable pivot" in item for item in result["shadow_vcp_quality_penalties"])
+
+
+def test_overextended_setup_receives_quality_penalty():
+    normal = evaluate_new_vcp_engine(_legacy_setup_row(close=97.0, _history=_valid_three_contraction_history()))
+    extended = evaluate_new_vcp_engine(_legacy_setup_row(close=103.0, _history=_valid_three_contraction_history()))
+
+    assert extended["passed"] is False
+    assert extended["is_extended"] is True
+    assert extended["shadow_vcp_quality_components"]["extension_penalty"] < 0
+    assert extended["shadow_vcp_quality_score"] < normal["shadow_vcp_quality_score"]
+
+
+def test_rs_and_trend_template_do_not_affect_shadow_vcp_quality_score():
+    base = evaluate_new_vcp_engine(_legacy_setup_row(
+        close=97.0,
+        rs_percentile=99.0,
+        _history=_valid_three_contraction_history(),
+    ))
+    weak_context = evaluate_new_vcp_engine(_legacy_setup_row(
+        close=97.0,
+        rs_percentile=5.0,
+        sma50=130.0,
+        sma150=125.0,
+        sma200=120.0,
+        sma200_20d_ago=121.0,
+        high_52w=160.0,
+        low_52w=95.0,
+        _history=_valid_three_contraction_history(),
+    ))
+
+    assert weak_context["shadow_vcp_quality_score"] == base["shadow_vcp_quality_score"]
+    assert weak_context["shadow_vcp_quality_components"] == base["shadow_vcp_quality_components"]

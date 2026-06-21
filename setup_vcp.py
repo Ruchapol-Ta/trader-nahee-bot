@@ -733,6 +733,174 @@ def _vcp_quality_score(
     return min(score, 100)
 
 
+def _shadow_vcp_quality_grade(score: int) -> str:
+    if score >= 90:
+        return "Elite"
+    if score >= 80:
+        return "Strong"
+    if score >= 70:
+        return "Good"
+    if score >= 60:
+        return "Weak"
+    return "Poor"
+
+
+def _component_result(score: int, reason: str) -> dict:
+    return {"score": score, "reason": reason}
+
+
+def _score_prior_uptrend(contractions: dict) -> dict:
+    if contractions.get("prior_uptrend_pass") is not True:
+        return _component_result(0, "prior uptrend not confirmed")
+    pct = _as_float(contractions.get("prior_uptrend_pct"))
+    if pct is None:
+        return _component_result(10, "prior uptrend passed without return data")
+    if pct >= 30:
+        return _component_result(15, f"prior uptrend advanced {pct:.1f}%")
+    if pct >= 20:
+        return _component_result(12, f"prior uptrend advanced {pct:.1f}%")
+    if pct >= 10:
+        return _component_result(8, f"prior uptrend advanced {pct:.1f}%")
+    return _component_result(5, f"prior uptrend pass was modest at {pct:.1f}%")
+
+
+def _score_base_depth(contractions: dict) -> dict:
+    depth = _as_float(contractions.get("base_depth"))
+    if depth is None:
+        return _component_result(0, "base depth unavailable")
+    if depth < VCP_MIN_BASE_DEPTH * 100:
+        return _component_result(0, f"base depth {depth:.1f}% is too shallow")
+    if depth <= 20:
+        return _component_result(15, f"base depth {depth:.1f}% is controlled")
+    if depth <= VCP_PREFERRED_BASE_DEPTH * 100:
+        return _component_result(12, f"base depth {depth:.1f}% is preferred")
+    if depth <= 30:
+        return _component_result(8, f"base depth {depth:.1f}% is above preferred")
+    if depth <= VCP_MAX_BASE_DEPTH * 100:
+        return _component_result(4, f"base depth {depth:.1f}% is loose")
+    return _component_result(0, f"base depth {depth:.1f}% is too deep")
+
+
+def _score_base_duration(contractions: dict) -> dict:
+    duration = _as_float(contractions.get("base_duration_days"))
+    if duration is None:
+        return _component_result(0, "base duration unavailable")
+    if duration < VCP_BASE_MIN_DAYS:
+        return _component_result(0, f"base duration {duration:.0f}d is too short")
+    if duration > VCP_BASE_MAX_DAYS:
+        return _component_result(0, f"base duration {duration:.0f}d is too long")
+    if 25 <= duration <= 90:
+        return _component_result(10, f"base duration {duration:.0f}d is constructive")
+    return _component_result(6, f"base duration {duration:.0f}d is acceptable")
+
+
+def _score_contraction_count(contractions: dict) -> dict:
+    count = int(contractions.get("contraction_count") or 0)
+    if count >= VCP_PREFERRED_CONTRACTIONS:
+        return _component_result(15, f"{count} contractions detected")
+    if count >= VCP_MIN_CONTRACTIONS:
+        return _component_result(5, f"{count} contractions detected")
+    if count == 1:
+        return _component_result(4, "only one contraction detected")
+    return _component_result(0, "no meaningful contractions detected")
+
+
+def _score_tightening(contractions: dict) -> dict:
+    tightening_score = _as_float(contractions.get("tightening_score")) or 0.0
+    component = max(0, min(15, round((tightening_score / 100) * 15)))
+    if component >= 14:
+        reason = "contractions tighten cleanly"
+    elif component >= 10:
+        reason = "contractions tighten acceptably"
+    elif component > 0:
+        reason = "tightening is weak"
+    else:
+        reason = "tightening unavailable"
+    warning = contractions.get("tightening_warning")
+    if warning:
+        reason = f"{reason}; {warning}"
+    return _component_result(component, reason)
+
+
+def _score_final_contraction(contractions: dict) -> dict:
+    depth = _as_float(contractions.get("final_contraction_depth"))
+    if depth is None:
+        return _component_result(0, "final contraction unavailable")
+    if depth <= 8:
+        return _component_result(15, f"final contraction {depth:.1f}% is tight")
+    if depth <= VCP_FINAL_CONTRACTION_PREFERRED_DEPTH * 100:
+        return _component_result(13, f"final contraction {depth:.1f}% is tight")
+    if depth <= VCP_FINAL_CONTRACTION_MAX_DEPTH * 100:
+        return _component_result(10, f"final contraction {depth:.1f}% is acceptable")
+    if depth <= VCP_FINAL_CONTRACTION_SHADOW_MAX_DEPTH * 100:
+        return _component_result(5, f"final contraction {depth:.1f}% is loose")
+    return _component_result(2, f"final contraction {depth:.1f}% is too wide")
+
+
+def _score_pivot_quality(pivot: dict) -> dict:
+    if pivot.get("pivot_price") is None:
+        return _component_result(0, "no identifiable pivot")
+    status = pivot.get("pivot_status")
+    distance = _as_float(pivot.get("distance_to_pivot_pct"))
+    if status == "extended":
+        return _component_result(4, "pivot identified but price is extended")
+    if status == "near_pivot":
+        return _component_result(15, f"pivot is actionable: {status}")
+    if status == "breaking_out":
+        return _component_result(12, f"pivot is actionable: {status}")
+    if distance is not None and distance <= 3:
+        return _component_result(8, f"pivot is within {distance:.1f}%")
+    if distance is not None and distance <= 5:
+        return _component_result(6, f"pivot is within {distance:.1f}%")
+    return _component_result(4, "pivot identified but price is below pivot")
+
+
+def _score_extension_penalty(pivot: dict) -> dict:
+    distance = _as_float(pivot.get("distance_to_pivot_pct"))
+    if pivot.get("is_extended"):
+        return _component_result(-15, pivot.get("extension_reason") or "price is extended above pivot")
+    if distance is not None and distance < 0:
+        return _component_result(-3, f"price is {abs(distance):.1f}% above pivot")
+    return _component_result(0, "not extended")
+
+
+def score_shadow_vcp_quality(contractions: dict, pivot: dict) -> dict:
+    """Score shadow VCP structure only; never uses RS percentile or Trend Template."""
+    component_specs = {
+        "prior_uptrend_quality": _score_prior_uptrend(contractions),
+        "base_depth_quality": _score_base_depth(contractions),
+        "base_duration_quality": _score_base_duration(contractions),
+        "contraction_count_quality": _score_contraction_count(contractions),
+        "tightening_quality": _score_tightening(contractions),
+        "final_contraction_quality": _score_final_contraction(contractions),
+        "pivot_quality": _score_pivot_quality(pivot),
+        "extension_penalty": _score_extension_penalty(pivot),
+    }
+    components = {
+        key: int(value["score"])
+        for key, value in component_specs.items()
+    }
+    reasons = [
+        f"{key}: {value['reason']}"
+        for key, value in component_specs.items()
+        if int(value["score"]) > 0
+    ]
+    penalties = [
+        f"{key}: {value['reason']}"
+        for key, value in component_specs.items()
+        if int(value["score"]) < 0 or (int(value["score"]) == 0 and key != "extension_penalty")
+    ]
+    raw_score = sum(components.values())
+    score = max(0, min(100, int(raw_score)))
+    return {
+        "shadow_vcp_quality_score": score,
+        "shadow_vcp_quality_grade": _shadow_vcp_quality_grade(score),
+        "shadow_vcp_quality_components": components,
+        "shadow_vcp_quality_reasons": reasons,
+        "shadow_vcp_quality_penalties": penalties,
+    }
+
+
 def detect_vcp_contractions(data: dict) -> dict:
     """Detect a Minervini-style contraction sequence for shadow diagnostics."""
     history, history_reasons = _extract_price_history(data)
@@ -1049,23 +1217,7 @@ def evaluate_new_vcp_engine(data: dict) -> dict:
         *contractions.get("warning_flags", []),
         *pivot.get("warning_flags", []),
     ]))
-    quality_score = _vcp_quality_score(
-        prior_uptrend_pass=contractions.get("prior_uptrend_pass"),
-        base_depth=(
-            contractions.get("base_depth") / 100
-            if contractions.get("base_depth") is not None
-            else None
-        ),
-        contraction_count=contractions.get("contraction_count", 0),
-        tightening_score=int(contractions.get("tightening_score") or 0),
-        final_depth=(
-            contractions.get("final_contraction_depth") / 100
-            if contractions.get("final_contraction_depth") is not None
-            else None
-        ),
-        volume_quality=contractions.get("volume_quality"),
-        pivot_identified=pivot.get("pivot_price") is not None,
-    )
+    quality = score_shadow_vcp_quality(contractions, pivot)
     return {
         "passed": not reject_reasons,
         "engine_version": "vcp_shadow_swing_pivot_v1",
@@ -1094,7 +1246,8 @@ def evaluate_new_vcp_engine(data: dict) -> dict:
         "pivot_age_days": pivot.get("pivot_age_days"),
         "is_extended": pivot.get("is_extended"),
         "extension_reason": pivot.get("extension_reason"),
-        "vcp_quality_score": quality_score,
+        **quality,
+        "vcp_quality_score": quality["shadow_vcp_quality_score"],
         "reject_reasons": reject_reasons,
         "warning_flags": warning_flags,
     }

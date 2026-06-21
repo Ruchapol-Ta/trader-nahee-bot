@@ -96,6 +96,12 @@ def _format_vcp_shadow(values: dict | None) -> list[str]:
             f"pivots {values.get('new_engine_pivot_identified', 0)} | "
             f"extended {values.get('new_engine_extended', 0)}"
         ),
+        f"- quality grades: {_format_key_counts(values.get('shadow_quality_grades'))}",
+        (
+            "- quality scores: "
+            f"{_format_key_counts(values.get('shadow_quality_score_buckets'))} | "
+            f"avg {_format_score(values.get('shadow_quality_average'))}"
+        ),
         f"- new reject reasons: {_format_key_counts(values.get('new_engine_reject_reasons'), limit=5)}",
         f"- new warning flags: {_format_key_counts(values.get('new_engine_warning_flags'), limit=5)}",
     ]

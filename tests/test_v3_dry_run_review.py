@@ -492,6 +492,17 @@ def test_format_v3_dry_run_review_includes_vcp_shadow_comparison():
             "new_engine_contractions_3plus": 2,
             "new_engine_pivot_identified": 6,
             "new_engine_extended": 1,
+            "shadow_quality_grades": {
+                "Elite": 1,
+                "Strong": 1,
+                "Poor": 3,
+            },
+            "shadow_quality_score_buckets": {
+                "90-100": 1,
+                "80-89": 1,
+                "0-59": 3,
+            },
+            "shadow_quality_average": 54.6,
             "new_engine_reject_reasons": {
                 "prior uptrend not confirmed": 3,
                 "final contraction depth 18.0% > 12%": 2,
@@ -518,6 +529,8 @@ def test_format_v3_dry_run_review_includes_vcp_shadow_comparison():
     assert "VCP shadow comparison:" in output
     assert "- agreement: both_failed: 5 | current_only: 3 | both_passed: 2" in output
     assert "- pass counts: current 5 | new 2 | 2+ contractions 4 | 3+ contractions 2 | pivots 6 | extended 1" in output
+    assert "- quality grades: Poor: 3 | Elite: 1 | Strong: 1" in output
+    assert "- quality scores: 0-59: 3 | 80-89: 1 | 90-100: 1 | avg 54.6" in output
     assert "prior uptrend not confirmed: 3" in output
     assert "preferred_contractions_missing: 2" in output
 

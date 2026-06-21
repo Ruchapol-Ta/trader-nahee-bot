@@ -15,7 +15,12 @@ def _setup_row(**overrides):
         "high": 101.0,
         "ema50": 92.0,
         "ema200": 80.0,
+        "sma50": 92.0,
+        "sma150": 85.0,
+        "sma200": 80.0,
+        "sma200_20d_ago": 78.0,
         "high_52w": 102.0,
+        "low_52w": 60.0,
         "range_5d_pct": 0.035,
         "range_10d_pct": 0.050,
         "range_20d_pct": 0.080,
@@ -37,6 +42,8 @@ def test_vcp_setup_passes_a_simple_breakout_with_contraction_and_volume():
 
     assert result["passed"] is True
     assert result["checks"]["trend"] is True
+    assert result["checks"]["trend_template"] is True
+    assert result["trend_template_pass"] is True
     assert result["checks"]["near_high"] is True
     assert result["checks"]["range_tightening"] is True
     assert result["checks"]["atr_contraction"] is True
@@ -45,10 +52,11 @@ def test_vcp_setup_passes_a_simple_breakout_with_contraction_and_volume():
     assert result["reject_reasons"] == []
 
 
-def test_vcp_setup_uses_only_trend_and_breakout_proximity_as_hard_gates():
+def test_vcp_setup_uses_trend_template_and_breakout_proximity_as_hard_gates():
     result = evaluate_vcp_setup(_setup_row(
         close=93.0,
         ema50=95.0,
+        sma50=95.0,
         pivot=99.0,
         range_5d_pct=0.090,
         atr=3.0,
@@ -57,7 +65,7 @@ def test_vcp_setup_uses_only_trend_and_breakout_proximity_as_hard_gates():
     ))
 
     assert result["passed"] is False
-    assert "price not above 50EMA/200EMA with 50EMA > 200EMA" in result["reject_reasons"]
+    assert any(reason.startswith("trend template failed") for reason in result["reject_reasons"])
     assert "close is not above or within near-breakout range of pivot/resistance" in result["reject_reasons"]
     assert "ATR is not contracting" not in result["reject_reasons"]
     assert "volume has not dried up in consolidation" not in result["reject_reasons"]

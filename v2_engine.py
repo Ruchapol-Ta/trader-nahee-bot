@@ -24,7 +24,7 @@ from liquidity_filter import (
     evaluate_liquidity,
 )
 from market_regime import evaluate_market_regime
-from relative_strength import evaluate_relative_strength
+from relative_strength import evaluate_relative_strength, rank_universe_rs_percentiles
 from risk_engine import build_trade_plan
 from scoring import score_candidate
 from screener import batch_download, compute_series, latest_snapshot, screen_universe
@@ -83,9 +83,9 @@ def _new_diagnostics(scanned: int = 0) -> dict:
 
 def _reject_bucket(reason: str) -> str:
     """Map a concrete reject reason to a stable aggregate diagnostics bucket."""
-    if reason.startswith("price not above"):
+    if reason.startswith("price not above") or reason.startswith("trend template failed"):
         return "rejected_by_trend"
-    if reason.startswith("did not outperform"):
+    if reason.startswith("did not outperform") or reason.startswith("RS percentile"):
         return "rejected_by_relative_strength"
     if "52-week high" in reason:
         return "rejected_by_52w_high"
@@ -737,7 +737,7 @@ def run_v2_scan(
         _warn_if_intraday_run(market_regime)
         tickers = get_v2_universe()
         logger.info(f"[V2] Screening {len(tickers)} V2 tickers")
-        snapshots = screen_universe(tickers)
+        snapshots = rank_universe_rs_percentiles(screen_universe(tickers))
         spy_return, qqq_return = _benchmark_returns(market_regime)
         diagnostics = _new_diagnostics(scanned=len(snapshots))
 

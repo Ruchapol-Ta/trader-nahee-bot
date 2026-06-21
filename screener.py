@@ -9,6 +9,7 @@
 # Fix #7 — compute_rsi fills NaN with a neutral 50 so flat-history tickers
 #   don't silently poison downstream comparisons.
 import logging
+import math
 import pandas as pd
 import yfinance as yf
 
@@ -17,7 +18,10 @@ from config import (
     DATA_PERIOD, DATA_INTERVAL,
     MIN_DATA_ROWS, VOLUME_WINDOW, SL_SWING_LOOKBACK,
     ATR_PERIOD, ATR_SMA_WINDOW, HIGH_52W_LOOKBACK,
-    RELATIVE_STRENGTH_LOOKBACK, VCP_CONTRACTION_LOOKBACK_SHORT,
+    RELATIVE_STRENGTH_LOOKBACK, RS_LOOKBACK_SHORT, RS_LOOKBACK_MEDIUM,
+    RS_LOOKBACK_LONG, TREND_TEMPLATE_SMA_SHORT, TREND_TEMPLATE_SMA_MID,
+    TREND_TEMPLATE_SMA_LONG, TREND_TEMPLATE_SMA200_RISING_LOOKBACK,
+    VCP_CONTRACTION_LOOKBACK_SHORT,
     VCP_CONTRACTION_LOOKBACK_MID, VCP_CONTRACTION_LOOKBACK_LONG,
     VCP_PIVOT_LOOKBACK,
 )
@@ -84,6 +88,9 @@ def compute_series(df: pd.DataFrame) -> dict | None:
         "ema50": close.ewm(span=EMA_MID, adjust=False).mean(),
         "ema200": close.ewm(span=EMA_LONG, adjust=False).mean(),
         "ema_long": close.ewm(span=EMA_LONG, adjust=False).mean(),
+        "sma50": close.rolling(TREND_TEMPLATE_SMA_SHORT).mean(),
+        "sma150": close.rolling(TREND_TEMPLATE_SMA_MID).mean(),
+        "sma200": close.rolling(TREND_TEMPLATE_SMA_LONG).mean(),
         "rsi": compute_rsi(close, RSI_PERIOD),
         "vol_sma20": volume.rolling(VOLUME_WINDOW).mean(),
         "atr": atr,
@@ -119,6 +126,98 @@ def _return_over_lookback(close: pd.Series, lookback: int) -> float:
         return 0.0
 
 
+def _finite_or_none(value: object) -> float | None:
+    """Return a finite float, or None for missing/invalid values."""
+    try:
+        if value is None:
+            return None
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_missing(missing_reasons: list[str], field: str, reason: str) -> None:
+    missing_reasons.append(f"{field} unavailable: {reason}")
+
+
+def _last_finite(series: pd.Series, field: str, missing_reasons: list[str]) -> float | None:
+    try:
+        value = series.iloc[-1]
+    except Exception:
+        _record_missing(missing_reasons, field, "latest value missing")
+        return None
+    number = _finite_or_none(value)
+    if number is None:
+        _record_missing(missing_reasons, field, "latest value is not finite")
+    return number
+
+
+def _value_n_days_ago(
+    series: pd.Series,
+    lookback: int,
+    field: str,
+    missing_reasons: list[str],
+) -> float | None:
+    try:
+        if len(series) <= lookback:
+            _record_missing(missing_reasons, field, f"requires at least {lookback + 1} rows")
+            return None
+        value = series.iloc[-lookback - 1]
+    except Exception:
+        _record_missing(missing_reasons, field, "historical value missing")
+        return None
+    number = _finite_or_none(value)
+    if number is None:
+        _record_missing(missing_reasons, field, "historical value is not finite")
+    return number
+
+
+def _return_over_lookback_optional(
+    close: pd.Series,
+    lookback: int,
+    field: str,
+    missing_reasons: list[str],
+) -> float | None:
+    try:
+        if len(close) <= lookback:
+            _record_missing(missing_reasons, field, f"requires at least {lookback + 1} rows")
+            return None
+        start = _finite_or_none(close.iloc[-lookback - 1])
+        end = _finite_or_none(close.iloc[-1])
+        if start in (None, 0) or end is None:
+            _record_missing(missing_reasons, field, "lookback values are not usable")
+            return None
+        return ((end - start) / start) * 100
+    except Exception as e:
+        logger.warning(f"[Screener] Optional lookback return calculation failed: {e}")
+        _record_missing(missing_reasons, field, type(e).__name__)
+        return None
+
+
+def _window_extreme(
+    series: pd.Series,
+    lookback: int,
+    field: str,
+    missing_reasons: list[str],
+    *,
+    mode: str,
+) -> float | None:
+    try:
+        window = series.iloc[-lookback:]
+        if window.empty:
+            _record_missing(missing_reasons, field, "window is empty")
+            return None
+        value = window.max() if mode == "max" else window.min()
+    except Exception:
+        _record_missing(missing_reasons, field, "window calculation failed")
+        return None
+    number = _finite_or_none(value)
+    if number is None:
+        _record_missing(missing_reasons, field, "window value is not finite")
+    return number
+
+
 def latest_snapshot(ticker: str, series: dict) -> dict | None:
     """Collapse a series dict into a single-row snapshot for the latest bar."""
     try:
@@ -126,6 +225,8 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
         high = series["high"]
         low = series["low"]
         volume = series["volume"]
+        missing_reasons: list[str] = []
+        data_quality_flags: list[str] = []
         today_close = float(close.iloc[-1])
         prev_close = float(close.iloc[-2])
         if prev_close == 0:
@@ -144,6 +245,53 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             pivot_window = high.iloc[-VCP_PIVOT_LOOKBACK:]
         if pivot_low_window.empty:
             pivot_low_window = low.iloc[-VCP_PIVOT_LOOKBACK:]
+        if len(close) < HIGH_52W_LOOKBACK:
+            data_quality_flags.append(
+                f"partial_52w_lookback:{len(close)}/{HIGH_52W_LOOKBACK}"
+            )
+        sma50 = _last_finite(series["sma50"], "sma50", missing_reasons)
+        sma150 = _last_finite(series["sma150"], "sma150", missing_reasons)
+        sma200 = _last_finite(series["sma200"], "sma200", missing_reasons)
+        sma200_20d_ago = _value_n_days_ago(
+            series["sma200"],
+            TREND_TEMPLATE_SMA200_RISING_LOOKBACK,
+            "sma200_20d_ago",
+            missing_reasons,
+        )
+        high_52w = _window_extreme(
+            high,
+            HIGH_52W_LOOKBACK,
+            "high_52w",
+            missing_reasons,
+            mode="max",
+        )
+        low_52w = _window_extreme(
+            low,
+            HIGH_52W_LOOKBACK,
+            "low_52w",
+            missing_reasons,
+            mode="min",
+        )
+        return_63d = _return_over_lookback_optional(
+            close,
+            RS_LOOKBACK_SHORT,
+            "return_63d",
+            missing_reasons,
+        )
+        return_126d = _return_over_lookback_optional(
+            close,
+            RS_LOOKBACK_MEDIUM,
+            "return_126d",
+            missing_reasons,
+        )
+        return_252d = _return_over_lookback_optional(
+            close,
+            RS_LOOKBACK_LONG,
+            "return_252d",
+            missing_reasons,
+        )
+        if missing_reasons:
+            data_quality_flags.append("missing_vcp_foundation_data")
         return {
             "ticker": ticker,
             "latest_bar_date": latest_bar_date,
@@ -156,6 +304,10 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "ema50": float(series["ema50"].iloc[-1]),
             "ema200": float(series["ema200"].iloc[-1]),
             "ema_long": float(series["ema_long"].iloc[-1]),
+            "sma50": sma50,
+            "sma150": sma150,
+            "sma200": sma200,
+            "sma200_20d_ago": sma200_20d_ago,
             "rsi": float(series["rsi"].iloc[-1]),
             "volume": float(volume.iloc[-1]),
             "avg_volume": avg_volume,
@@ -163,7 +315,11 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "swing_low_5": float(low.iloc[-SL_SWING_LOOKBACK:].min()),
             "avg_dollar_volume": float(dollar_volume.iloc[-VOLUME_WINDOW:].mean()),
             "return_20d": _return_over_lookback(close, RELATIVE_STRENGTH_LOOKBACK),
-            "high_52w": float(high.iloc[-HIGH_52W_LOOKBACK:].max()),
+            "return_63d": return_63d,
+            "return_126d": return_126d,
+            "return_252d": return_252d,
+            "high_52w": high_52w,
+            "low_52w": low_52w,
             "range_5d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_SHORT),
             "range_10d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_MID),
             "range_20d_pct": _pct_range(high, low, today_close, VCP_CONTRACTION_LOOKBACK_LONG),
@@ -177,6 +333,8 @@ def latest_snapshot(ticker: str, series: dict) -> dict | None:
             "contraction_low": float(
                 low.iloc[-VCP_CONTRACTION_LOOKBACK_MID:].min()
             ),
+            "data_quality_flags": data_quality_flags,
+            "missing_data_reasons": missing_reasons,
         }
     except (IndexError, ValueError, KeyError) as e:
         logger.warning(f"[Screener] {ticker}: snapshot error — {e}")

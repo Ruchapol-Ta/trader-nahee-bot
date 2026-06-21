@@ -59,7 +59,12 @@ def _candidate_row(**overrides):
         "high": 101.0,
         "ema50": 92.0,
         "ema200": 80.0,
+        "sma50": 92.0,
+        "sma150": 85.0,
+        "sma200": 80.0,
+        "sma200_20d_ago": 78.0,
         "high_52w": 102.0,
+        "low_52w": 60.0,
         "range_5d_pct": 0.035,
         "range_10d_pct": 0.050,
         "range_20d_pct": 0.080,
@@ -73,6 +78,9 @@ def _candidate_row(**overrides):
         "contraction_low": 94.0,
         "pivot_low": 95.0,
         "return_20d": 6.0,
+        "return_63d": 18.0,
+        "return_126d": 30.0,
+        "return_252d": 55.0,
         "market_cap": 3_000_000_000.0,
     }
     data.update(overrides)
@@ -360,8 +368,8 @@ def test_v2_scan_reports_filter_funnel_and_reject_aggregation(monkeypatch):
         "screen_universe",
         lambda tickers: [
             _candidate_row(ticker="PASS"),
-            _candidate_row(ticker="TREND", ema50=110.0),
-            _candidate_row(ticker="RS", return_20d=0.5),
+            _candidate_row(ticker="TREND", sma50=110.0),
+            _candidate_row(ticker="RS", return_20d=0.5, return_63d=-10.0, return_126d=-15.0, return_252d=-20.0),
             _candidate_row(ticker="HIGH", high_52w=120.0),
         ],
     )

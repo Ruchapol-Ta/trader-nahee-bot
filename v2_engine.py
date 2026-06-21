@@ -51,6 +51,14 @@ _V3_BLOCKER_LABELS = {
     "missing_setup_confirmation": "missing_setup",
     "other": "other",
 }
+_GRADE_RANK = {
+    "Reject": 0,
+    "C": 1,
+    "B": 2,
+    "A": 3,
+    "A+": 4,
+}
+_GRADE_BY_RANK = {value: key for key, value in _GRADE_RANK.items()}
 
 
 def _new_diagnostics(scanned: int = 0) -> dict:
@@ -246,6 +254,123 @@ def _vcp_shadow_summary(diagnostics: dict | None) -> dict:
         "shadow_quality_average": average_score,
         "new_engine_reject_reasons": dict(shadow["new_engine_reject_reasons"]),
         "new_engine_warning_flags": dict(shadow["new_engine_warning_flags"]),
+    }
+
+
+def _shadow_grade_cap_for_score(shadow_score: object) -> tuple[str, str]:
+    """Return the maximum simulated grade allowed by Shadow VCP quality."""
+    try:
+        score = float(shadow_score)
+    except (TypeError, ValueError):
+        return "C", "shadow score unavailable; max simulated grade C"
+    if score < 70:
+        return "C", f"shadow score {score:.0f} < 70; max simulated grade C"
+    if score < 80:
+        return "B", f"shadow score {score:.0f} in 70-79; max simulated grade B"
+    if score < 90:
+        return "A", f"shadow score {score:.0f} in 80-89; max simulated grade A"
+    return "A+", f"shadow score {score:.0f} >= 90; A+ eligible"
+
+
+def _apply_shadow_grade_cap(current_grade: object, shadow_score: object) -> tuple[str, str]:
+    """Simulate a cap-only grade result without changing production grading."""
+    current = str(current_grade or "Reject")
+    current_rank = _GRADE_RANK.get(current, 0)
+    cap_grade, cap_reason = _shadow_grade_cap_for_score(shadow_score)
+    cap_rank = _GRADE_RANK[cap_grade]
+    simulated_rank = min(current_rank, cap_rank)
+    simulated_grade = _GRADE_BY_RANK[simulated_rank]
+    if simulated_rank < current_rank:
+        reason = f"{cap_reason}; current grade {current} capped to {simulated_grade}"
+    else:
+        reason = f"{cap_reason}; current grade {current} unchanged by cap-only simulation"
+    return simulated_grade, reason
+
+
+def _shadow_grade_cap_row(candidate: dict) -> dict:
+    """Build one report row for the Shadow VCP grade-cap simulation."""
+    new_engine = candidate.get("new_vcp_engine")
+    new_engine = new_engine if isinstance(new_engine, dict) else {}
+    shadow_score = new_engine.get("shadow_vcp_quality_score")
+    current_grade = str(candidate.get("grade") or "Reject")
+    simulated_grade, reason = _apply_shadow_grade_cap(current_grade, shadow_score)
+    return {
+        "ticker": candidate.get("ticker"),
+        "current_grade": current_grade,
+        "simulated_grade": simulated_grade,
+        "simulated_grade_reason": reason,
+        "current_score": candidate.get("score"),
+        "shadow_score": shadow_score,
+        "shadow_grade": new_engine.get("shadow_vcp_quality_grade"),
+        "shadow_passed": bool(new_engine.get("passed")),
+        "trend_template_pass": candidate.get("trend_template_pass"),
+        "rs_percentile": candidate.get("rs_percentile"),
+        "contraction_count": new_engine.get("contraction_count"),
+        "base_depth": new_engine.get("base_depth"),
+        "final_contraction_depth": new_engine.get("final_contraction_depth"),
+        "pivot_status": new_engine.get("pivot_status"),
+        "distance_to_pivot_pct": new_engine.get("distance_to_pivot_pct"),
+    }
+
+
+def _ranked_shadow_grade_cap_rows(rows: list[dict]) -> list[dict]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            _GRADE_RANK.get(row.get("current_grade"), 0)
+            - _GRADE_RANK.get(row.get("simulated_grade"), 0),
+            row.get("current_score") or 0,
+            -(float(row.get("shadow_score")) if row.get("shadow_score") is not None else -1),
+            str(row.get("ticker") or ""),
+        ),
+        reverse=True,
+    )
+
+
+def _shadow_grade_cap_simulation(candidates: list[dict]) -> dict:
+    """Simulate Shadow VCP as a future grade cap; production grades stay unchanged."""
+    rows = [_shadow_grade_cap_row(candidate) for candidate in candidates]
+    current_distribution = Counter(row["current_grade"] for row in rows)
+    simulated_distribution = Counter(row["simulated_grade"] for row in rows)
+    promotions = [
+        row for row in rows
+        if _GRADE_RANK.get(row["simulated_grade"], 0) > _GRADE_RANK.get(row["current_grade"], 0)
+    ]
+    demotions = [
+        row for row in rows
+        if _GRADE_RANK.get(row["simulated_grade"], 0) < _GRADE_RANK.get(row["current_grade"], 0)
+    ]
+    demotions = _ranked_shadow_grade_cap_rows(demotions)
+    biggest_a_to_c = [
+        row for row in demotions
+        if row["current_grade"] == "A" and row["simulated_grade"] == "C"
+    ]
+    biggest_b_to_a_or_a_plus = [
+        row for row in rows
+        if row["current_grade"] == "B" and row["simulated_grade"] in {"A", "A+"}
+    ]
+    top_simulated_a_plus = [
+        row for row in rows
+        if row["simulated_grade"] == "A+"
+    ]
+    top_simulated_a_plus.sort(
+        key=lambda row: (
+            float(row.get("shadow_score")) if row.get("shadow_score") is not None else -1,
+            row.get("current_score") or 0,
+            str(row.get("ticker") or ""),
+        ),
+        reverse=True,
+    )
+    return {
+        "mode": "cap_only",
+        "current_distribution": dict(current_distribution),
+        "simulated_distribution": dict(simulated_distribution),
+        "promotions": promotions,
+        "demotions": demotions,
+        "biggest_a_to_c_changes": biggest_a_to_c,
+        "biggest_b_to_a_or_a_plus_changes": biggest_b_to_a_or_a_plus,
+        "top_simulated_a_plus_candidates": top_simulated_a_plus[:20],
+        "rows": rows,
     }
 
 
@@ -748,6 +873,7 @@ def qualify_snapshot(
             "grade": grade,
             "raw_score": score.get("raw_score", score["score"]),
             "category_scores": score["category_scores"],
+            "trend_template_pass": setup.get("trend_template_pass"),
             "current_vcp_logic": setup.get("current_vcp_logic"),
             "new_vcp_engine": setup.get("new_vcp_engine"),
             "vcp_engine_comparison": setup.get("vcp_engine_comparison"),
@@ -825,6 +951,7 @@ def run_v2_scan(
                 "funnel": dict(diagnostics["funnel"]),
                 "reject_reasons": {},
                 "vcp_shadow": _vcp_shadow_summary(diagnostics),
+                "shadow_grade_cap_simulation": _shadow_grade_cap_simulation([]),
                 "near_misses": [],
                 "top_candidates": [],
                 "market_regime_valid": False,
@@ -960,6 +1087,7 @@ def run_v2_scan(
             "funnel": dict(diagnostics["funnel"]),
             "reject_reasons": dict(diagnostics["reject_reasons"]),
             "vcp_shadow": _vcp_shadow_summary(diagnostics),
+            "shadow_grade_cap_simulation": _shadow_grade_cap_simulation(qualified),
             "near_misses": near_misses,
             "top_candidates": top_candidates,
         }

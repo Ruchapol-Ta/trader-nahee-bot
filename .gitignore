@@ -27,3 +27,6 @@ Thumbs.db
 *.log
 *.log.*
 data/signal_journal.jsonl
+
+# Generated review reports
+reports/daily_review/

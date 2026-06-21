@@ -6,10 +6,14 @@
 #   can't cost us days of signals.
 # Fix #18 — file logging with daily rotation (see logging_config).
 # Fix #19 — misfire grace lifted to MISFIRE_GRACE_SEC (1 h) with coalesce=True.
+import csv
+import json
 import logging
+import math
 import sys
 import os
 from datetime import datetime
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -27,6 +31,24 @@ from v2_engine import run_v2_scan
 
 setup_logging()
 logger = logging.getLogger(__name__)
+DAILY_REVIEW_REPORT_DIR = Path("reports/daily_review")
+_SHADOW_GRADE_CAP_CSV_COLUMNS = [
+    "ticker",
+    "current_grade",
+    "simulated_grade",
+    "simulated_grade_reason",
+    "current_score",
+    "shadow_score",
+    "shadow_grade",
+    "shadow_passed",
+    "trend_template_pass",
+    "rs_percentile",
+    "contraction_count",
+    "base_depth",
+    "final_contraction_depth",
+    "pivot_status",
+    "distance_to_pivot_pct",
+]
 
 
 def _yes_no(value: object) -> str:
@@ -76,6 +98,18 @@ def _format_key_counts(values: dict | None, limit: int | None = None) -> str:
     return " | ".join(f"{key}: {value}" for key, value in items)
 
 
+def _format_grade_counts(values: dict | None) -> str:
+    if not values:
+        return "none"
+    ordered = ["A+", "A", "B", "C", "Reject"]
+    parts = [
+        f"{grade}: {values.get(grade, 0)}"
+        for grade in ordered
+        if values.get(grade, 0)
+    ]
+    return " | ".join(parts) if parts else "none"
+
+
 def _format_v3_blockers(values: dict | None) -> list[str]:
     if not values:
         return ["- none: 0"]
@@ -113,6 +147,66 @@ def _format_score(value: object) -> str:
     except (TypeError, ValueError):
         return "n/a"
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def _json_safe(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, str):
+        return value
+    try:
+        return _json_safe(value.item())
+    except AttributeError:
+        return str(value)
+
+
+def export_shadow_grade_cap_reports(
+    result: dict,
+    report_dir: Path | str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Write dry-run-only Shadow VCP grade-cap CSV/JSON reports."""
+    simulation = result.get("shadow_grade_cap_simulation")
+    if not isinstance(simulation, dict):
+        return {}
+    rows = simulation.get("rows") or []
+    generated_at = now or datetime.now()
+    report_root = Path(report_dir or DAILY_REVIEW_REPORT_DIR)
+    report_root.mkdir(parents=True, exist_ok=True)
+    base_name = f"shadow_grade_cap_{generated_at.strftime('%Y%m%d_%H%M%S')}"
+    json_path = report_root / f"{base_name}.json"
+    csv_path = report_root / f"{base_name}.csv"
+
+    payload = {
+        "report_type": "shadow_grade_cap_simulation",
+        "generated_at": generated_at.isoformat(timespec="seconds"),
+        "simulation": simulation,
+    }
+    json_path.write_text(
+        json.dumps(_json_safe(payload), allow_nan=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    with csv_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=_SHADOW_GRADE_CAP_CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                column: _json_safe(row.get(column))
+                for column in _SHADOW_GRADE_CAP_CSV_COLUMNS
+            })
+    return {
+        "json": str(json_path),
+        "csv": str(csv_path),
+        "row_count": len(rows),
+    }
 
 
 def _format_pct(value: object) -> str:
@@ -164,6 +258,60 @@ def _format_selected_v3_review(rows: list[dict] | None) -> list[str]:
     return lines
 
 
+def _format_shadow_grade_cap_rows(
+    rows: list[dict] | None,
+    limit: int = 5,
+    empty: str = "none",
+) -> list[str]:
+    if not rows:
+        return [f"- {empty}"]
+    lines = []
+    for row in rows[:limit]:
+        lines.append(
+            f"- {row.get('ticker') or 'UNKNOWN'} | "
+            f"{row.get('current_grade') or 'n/a'}->{row.get('simulated_grade') or 'n/a'} | "
+            f"shadow {_format_score(row.get('shadow_score'))} | "
+            f"{row.get('simulated_grade_reason') or 'no reason'}"
+        )
+    return lines
+
+
+def _format_shadow_grade_cap(values: dict | None, files: dict | None = None) -> list[str]:
+    if not values:
+        return ["Shadow grade-cap simulation:", "- unavailable"]
+    promotions = values.get("promotions") or []
+    demotions = values.get("demotions") or []
+    lines = [
+        "Shadow grade-cap simulation:",
+        f"- current grades: {_format_grade_counts(values.get('current_distribution'))}",
+        f"- simulated grades: {_format_grade_counts(values.get('simulated_distribution'))}",
+        f"- promotions: {len(promotions)}",
+        f"- demotions: {len(demotions)}",
+        "Promotions:",
+        *_format_shadow_grade_cap_rows(
+            promotions,
+            empty="none; cap-only simulation cannot promote grades",
+        ),
+        "Demotions:",
+        *_format_shadow_grade_cap_rows(demotions),
+        "Biggest A->C changes:",
+        *_format_shadow_grade_cap_rows(values.get("biggest_a_to_c_changes")),
+        "Biggest B->A/A+ changes:",
+        *_format_shadow_grade_cap_rows(
+            values.get("biggest_b_to_a_or_a_plus_changes"),
+            empty="none; cap-only simulation cannot promote B candidates",
+        ),
+        "Top simulated A+ candidates:",
+        *_format_shadow_grade_cap_rows(values.get("top_simulated_a_plus_candidates")),
+    ]
+    if files:
+        lines.extend([
+            f"CSV export: {files.get('csv') or 'not written'}",
+            f"JSON export: {files.get('json') or 'not written'}",
+        ])
+    return lines
+
+
 def format_v3_dry_run_review(result: dict) -> str:
     """Format a compact V3 dry-run review without exposing credentials."""
     lines = [
@@ -180,6 +328,10 @@ def format_v3_dry_run_review(result: dict) -> str:
         f"Reject aggregation: {_format_key_counts(result.get('reject_reasons'), limit=5)}",
         "VCP shadow comparison:",
         *_format_vcp_shadow(result.get("vcp_shadow")),
+        *_format_shadow_grade_cap(
+            result.get("shadow_grade_cap_simulation"),
+            result.get("shadow_grade_cap_report_files"),
+        ),
         f"V3 decisions: {_format_decision_counts(result.get('v3_decision_counts') or {})}",
         f"Telegram delivery: {'skipped' if result.get('telegram_skipped') else 'enabled'}",
         f"Journal writes: {'skipped' if result.get('journal_skipped') else 'enabled'}",
@@ -222,7 +374,7 @@ def run_v3_dry_run_review() -> dict:
     previous_decision_layer = v2_runtime.ENABLE_V3_DECISION_LAYER
     try:
         v2_runtime.ENABLE_V3_DECISION_LAYER = True
-        return run_v2_scan(
+        result = run_v2_scan(
             debug="--debug-v2" in sys.argv,
             send_telegram=False,
             write_journal=False,
@@ -231,6 +383,8 @@ def run_v3_dry_run_review() -> dict:
             fetch_liquidity_metadata=False,
             log_liquidity_metadata_warnings=False,
         )
+        result["shadow_grade_cap_report_files"] = export_shadow_grade_cap_reports(result)
+        return result
     finally:
         v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer
 

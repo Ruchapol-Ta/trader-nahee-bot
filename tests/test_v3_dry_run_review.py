@@ -1,6 +1,7 @@
 import os
 import sys
 import copy
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -47,6 +48,28 @@ def _signal(ticker="AAA", grade="A", score=82, actual=True, near=False):
         "invalid_condition": "None",
         "market_regime": "Bullish market regime",
     }
+
+
+def _shadow_cap_candidate(ticker, grade, score, shadow_score):
+    signal = _signal(ticker=ticker, grade=grade, score=score)
+    signal["trend_template_pass"] = True
+    signal["rs_percentile"] = 90.0
+    signal["new_vcp_engine"] = {
+        "passed": shadow_score >= 70,
+        "shadow_vcp_quality_score": shadow_score,
+        "shadow_vcp_quality_grade": (
+            "Elite" if shadow_score >= 90
+            else "Strong" if shadow_score >= 80
+            else "Good" if shadow_score >= 70
+            else "Poor"
+        ),
+        "contraction_count": 3,
+        "base_depth": 24.0,
+        "final_contraction_depth": 6.0,
+        "pivot_status": "near_pivot",
+        "distance_to_pivot_pct": 1.0,
+    }
+    return signal
 
 
 def _patch_scan_inputs(monkeypatch, qualified):
@@ -533,6 +556,132 @@ def test_format_v3_dry_run_review_includes_vcp_shadow_comparison():
     assert "- quality scores: 0-59: 3 | 80-89: 1 | 90-100: 1 | avg 54.6" in output
     assert "prior uptrend not confirmed: 3" in output
     assert "preferred_contractions_missing: 2" in output
+
+
+def test_shadow_grade_cap_simulation_demotes_without_promoting():
+    simulation = v2_engine._shadow_grade_cap_simulation([
+        _shadow_cap_candidate("ELITE", "A+", 91, 95),
+        _shadow_cap_candidate("WEAK", "A", 81, 37),
+        _shadow_cap_candidate("BSTRONG", "B", 74, 95),
+        _shadow_cap_candidate("STRONG", "A", 80, 85),
+        _shadow_cap_candidate("CAPA", "A+", 90, 85),
+        _shadow_cap_candidate("GOOD", "B", 70, 75),
+    ])
+
+    by_ticker = {
+        row["ticker"]: row
+        for row in simulation["rows"]
+    }
+
+    assert simulation["current_distribution"] == {"A+": 2, "A": 2, "B": 2}
+    assert simulation["simulated_distribution"] == {"A+": 1, "C": 1, "B": 2, "A": 2}
+    assert simulation["promotions"] == []
+    assert by_ticker["WEAK"]["simulated_grade"] == "C"
+    assert "capped to C" in by_ticker["WEAK"]["simulated_grade_reason"]
+    assert by_ticker["BSTRONG"]["simulated_grade"] == "B"
+    assert simulation["biggest_a_to_c_changes"][0]["ticker"] == "WEAK"
+    assert simulation["biggest_b_to_a_or_a_plus_changes"] == []
+    assert simulation["top_simulated_a_plus_candidates"][0]["ticker"] == "ELITE"
+
+
+def test_format_v3_dry_run_review_includes_shadow_grade_cap_simulation():
+    simulation = v2_engine._shadow_grade_cap_simulation([
+        _shadow_cap_candidate("ELITE", "A+", 91, 95),
+        _shadow_cap_candidate("WEAK", "A", 81, 37),
+        _shadow_cap_candidate("BSTRONG", "B", 74, 95),
+    ])
+
+    output = signal_bot.format_v3_dry_run_review({
+        "market_regime": "Bullish market regime",
+        "market_regime_valid": True,
+        "scanned": 3,
+        "trade_signals": 1,
+        "watchlist": 1,
+        "funnel": {"scanned": 3},
+        "reject_reasons": {},
+        "vcp_shadow": {},
+        "shadow_grade_cap_simulation": simulation,
+        "shadow_grade_cap_report_files": {
+            "csv": "reports/daily_review/shadow_grade_cap.csv",
+            "json": "reports/daily_review/shadow_grade_cap.json",
+        },
+        "v3_decision_counts": {},
+        "telegram_skipped": True,
+        "journal_skipped": True,
+        "v3_blockers": {},
+        "v3_selected_review": [],
+        "v3_sample_decisions": [],
+    })
+
+    assert "Shadow grade-cap simulation:" in output
+    assert "- current grades: A+: 1 | A: 1 | B: 1" in output
+    assert "- simulated grades: A+: 1 | B: 1 | C: 1" in output
+    assert "- promotions: 0" in output
+    assert "- demotions: 1" in output
+    assert "WEAK | A->C | shadow 37" in output
+    assert "none; cap-only simulation cannot promote B candidates" in output
+    assert "Top simulated A+ candidates:" in output
+    assert "CSV export: reports/daily_review/shadow_grade_cap.csv" in output
+    assert "JSON export: reports/daily_review/shadow_grade_cap.json" in output
+
+
+def test_shadow_grade_cap_report_export_writes_csv_and_json(tmp_path):
+    simulation = v2_engine._shadow_grade_cap_simulation([
+        _shadow_cap_candidate("ELITE", "A+", 91, 95),
+        _shadow_cap_candidate("WEAK", "A", 81, 37),
+    ])
+    files = signal_bot.export_shadow_grade_cap_reports(
+        {"shadow_grade_cap_simulation": simulation},
+        report_dir=tmp_path,
+    )
+
+    csv_path = tmp_path / os.path.basename(files["csv"])
+    json_path = tmp_path / os.path.basename(files["json"])
+
+    assert files["row_count"] == 2
+    assert csv_path.exists()
+    assert json_path.exists()
+    assert "ticker,current_grade,simulated_grade" in csv_path.read_text(encoding="utf-8")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["report_type"] == "shadow_grade_cap_simulation"
+    assert payload["simulation"]["rows"][0]["ticker"] == "ELITE"
+
+
+def test_run_v3_dry_run_review_exports_shadow_grade_cap_reports(monkeypatch, tmp_path):
+    simulation = v2_engine._shadow_grade_cap_simulation([
+        _shadow_cap_candidate("ELITE", "A+", 91, 95),
+    ])
+
+    def fake_run_v2_scan(**kwargs):
+        assert kwargs["send_telegram"] is False
+        assert kwargs["write_journal"] is False
+        return {
+            "market_regime": "Bullish market regime",
+            "market_regime_valid": True,
+            "scanned": 1,
+            "trade_signals": 1,
+            "watchlist": 0,
+            "funnel": {"scanned": 1},
+            "reject_reasons": {},
+            "vcp_shadow": {},
+            "shadow_grade_cap_simulation": simulation,
+            "v3_decision_counts": {},
+            "telegram_skipped": True,
+            "journal_skipped": True,
+            "v3_blockers": {},
+            "v3_selected_review": [],
+            "v3_sample_decisions": [],
+        }
+
+    monkeypatch.setattr(signal_bot, "DAILY_REVIEW_REPORT_DIR", tmp_path)
+    monkeypatch.setattr(signal_bot, "run_v2_scan", fake_run_v2_scan)
+
+    result = signal_bot.run_v3_dry_run_review()
+
+    files = result["shadow_grade_cap_report_files"]
+    assert files["row_count"] == 1
+    assert os.path.exists(files["csv"])
+    assert os.path.exists(files["json"])
 
 
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):

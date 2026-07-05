@@ -28,10 +28,12 @@ from logging_config import setup_logging
 from telegram_sender import build_telegram_rollout_dry_run_checklist, send_error_alert
 import v2_engine as v2_runtime
 from v2_engine import run_v2_scan
+from research_ledger import write_research_ledger_for_shadow_reports
 
 setup_logging()
 logger = logging.getLogger(__name__)
 DAILY_REVIEW_REPORT_DIR = Path("reports/daily_review")
+RESEARCH_LEDGER_ROOT = Path("reports/research_ledger")
 _SHADOW_GRADE_CAP_CSV_COLUMNS = [
     "ticker",
     "current_grade",
@@ -384,6 +386,12 @@ def run_v3_dry_run_review() -> dict:
             log_liquidity_metadata_warnings=False,
         )
         result["shadow_grade_cap_report_files"] = export_shadow_grade_cap_reports(result)
+        result["research_ledger_files"] = write_research_ledger_for_shadow_reports(
+            result,
+            result["shadow_grade_cap_report_files"],
+            ledger_root=RESEARCH_LEDGER_ROOT,
+            repo_root=Path(__file__).resolve().parent,
+        )
         return result
     finally:
         v2_runtime.ENABLE_V3_DECISION_LAYER = previous_decision_layer

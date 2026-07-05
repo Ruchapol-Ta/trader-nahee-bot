@@ -674,6 +674,7 @@ def test_run_v3_dry_run_review_exports_shadow_grade_cap_reports(monkeypatch, tmp
         }
 
     monkeypatch.setattr(signal_bot, "DAILY_REVIEW_REPORT_DIR", tmp_path)
+    monkeypatch.setattr(signal_bot, "RESEARCH_LEDGER_ROOT", tmp_path / "research_ledger")
     monkeypatch.setattr(signal_bot, "run_v2_scan", fake_run_v2_scan)
 
     result = signal_bot.run_v3_dry_run_review()
@@ -682,6 +683,12 @@ def test_run_v3_dry_run_review_exports_shadow_grade_cap_reports(monkeypatch, tmp
     assert files["row_count"] == 1
     assert os.path.exists(files["csv"])
     assert os.path.exists(files["json"])
+    assert result["telegram_skipped"] is True
+    assert result["journal_skipped"] is True
+    ledger_files = result["research_ledger_files"]
+    assert ledger_files["event_count"] == 3
+    assert os.path.exists(ledger_files["event_file"])
+    assert os.path.exists(ledger_files["csv_artifact_path"])
 
 
 def test_run_v2_scan_quiet_mode_suppresses_reject_logs_but_keeps_aggregation(monkeypatch):

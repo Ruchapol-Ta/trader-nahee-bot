@@ -69,6 +69,14 @@ jobs:
             echo "::error::No JSON review report was generated"
             exit 1
           fi
+          if [ ! -d reports/research_ledger/events ]; then
+            echo "::error::reports/research_ledger/events was not created"
+            exit 1
+          fi
+          if ! find reports/research_ledger/events -name '*.jsonl' -print -quit | grep -q .; then
+            echo "::error::No research ledger event file was generated"
+            exit 1
+          fi
 
       - name: Upload review reports
         if: always()
@@ -78,5 +86,7 @@ jobs:
           path: |
             reports/daily_review/*.csv
             reports/daily_review/*.json
+            reports/research_ledger/**/*.jsonl
+            reports/research_ledger/artifacts/**
           if-no-files-found: warn
           retention-days: 30

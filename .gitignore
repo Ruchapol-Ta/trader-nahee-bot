@@ -31,3 +31,4 @@ data/signal_journal.jsonl
 # Generated review reports
 reports/daily_review/
 reports/research_ledger/
+reports/research_mart/

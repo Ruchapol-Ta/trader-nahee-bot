@@ -78,6 +78,15 @@ jobs:
             exit 1
           fi
 
+      - name: Build research mart
+        run: |
+          if [ ! -d reports/research_ledger/events ]; then
+            echo "::error::reports/research_ledger/events is missing; cannot build research mart"
+            exit 1
+          fi
+          python -m research.mart build --events-root reports/research_ledger/events --output reports/research_mart/research_mart.sqlite
+          python -m research.mart summary --db reports/research_mart/research_mart.sqlite
+
       - name: Upload review reports
         if: always()
         uses: actions/upload-artifact@v4.6.2
@@ -89,4 +98,12 @@ jobs:
             reports/research_ledger/**/*.jsonl
             reports/research_ledger/artifacts/**
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload research mart
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: research-mart-${{ github.run_id }}
+          path: reports/research_mart/research_mart.sqlite
+          if-no-files-found: error
           retention-days: 30

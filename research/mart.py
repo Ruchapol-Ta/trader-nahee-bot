@@ -9,6 +9,7 @@ read-only and are never modified.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sqlite3
@@ -21,8 +22,33 @@ from research.schema import EventValidationError, validate_event
 
 DEFAULT_EVENTS_ROOT = Path("reports/research_ledger/events")
 DEFAULT_MART_PATH = Path("reports/research_mart/research_mart.sqlite")
+DEFAULT_LATEST_TICKERS_CSV = Path("reports/research_mart/latest_ticker_observations.csv")
 MART_SCHEMA_VERSION = 1
 _TOP_TICKER_LIMIT = 5
+
+# Fixed CSV contract for export-latest-tickers; order is part of the contract.
+_EXPORT_COLUMNS = (
+    "ticker",
+    "current_grade",
+    "simulated_grade",
+    "shadow_grade",
+    "shadow_score",
+    "shadow_passed",
+    "rs_percentile",
+    "trend_template_pass",
+    "pivot_status",
+    "stop_distance",
+    "volume_confirmation_ratio",
+    "contraction_count",
+    "base_depth",
+    "base_duration",
+    "shadow_reject_reasons",
+    "warning_flags",
+    "raw_row_index",
+    "observation_id",
+    "run_id",
+    "event_timestamp",
+)
 
 # ticker_observations is keyed on event_id, not observation_id: duplicate
 # ticker rows in one report legitimately share an observation_id.
@@ -414,6 +440,51 @@ def summarize_mart(db_path: Path | str = DEFAULT_MART_PATH) -> dict:
     }
 
 
+def export_latest_tickers(
+    db_path: Path | str = DEFAULT_MART_PATH,
+    out_path: Path | str = DEFAULT_LATEST_TICKERS_CSV,
+) -> dict:
+    """Write the latest run's ticker observations to a deterministic CSV.
+
+    Latest means latest: an empty newest run yields a header-only CSV rather
+    than falling back to an older populated run.
+    """
+    db_path = Path(db_path)
+    out_path = Path(out_path)
+    if not db_path.exists():
+        # Guard: sqlite3.connect would silently create an empty file here.
+        raise FileNotFoundError(f"mart database not found: {db_path.as_posix()}")
+
+    connection = sqlite3.connect(str(db_path))
+    try:
+        latest = connection.execute(
+            "SELECT run_id FROM runs ORDER BY event_timestamp DESC, run_id DESC LIMIT 1"
+        ).fetchone()
+        run_id = latest[0] if latest else None
+        rows = []
+        if run_id is not None:
+            rows = connection.execute(
+                f"SELECT {', '.join(_EXPORT_COLUMNS)} FROM ticker_observations"
+                " WHERE run_id = ?"
+                " ORDER BY shadow_score DESC, ticker ASC, raw_row_index ASC",
+                (run_id,),
+            ).fetchall()
+    finally:
+        connection.close()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(_EXPORT_COLUMNS)
+        writer.writerows(rows)
+
+    return {
+        "out_path": out_path.as_posix(),
+        "run_id": run_id,
+        "row_count": len(rows),
+    }
+
+
 def _format_build_summary(summary: dict) -> str:
     counts = summary["table_counts"]
     lines = [
@@ -493,6 +564,20 @@ def _format_mart_summary(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_export_summary(result: dict) -> str:
+    lines = [
+        "Research mart export",
+        f"CSV: {result['out_path']}",
+        f"Latest run: {result['run_id'] or 'none'}",
+        f"Rows exported: {result['row_count']}",
+    ]
+    if result["run_id"] is None:
+        lines.append("Note: mart contains no runs; wrote header-only CSV")
+    elif result["row_count"] == 0:
+        lines.append("Note: 0 ticker observations; latest run is an empty report")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m research.mart",
@@ -507,10 +592,24 @@ def main(argv: list[str] | None = None) -> int:
     summary_parser = subparsers.add_parser("summary", help="summarize an existing mart database")
     summary_parser.add_argument("--db", default=str(DEFAULT_MART_PATH))
 
+    export_parser = subparsers.add_parser(
+        "export-latest-tickers", help="export latest-run ticker observations to CSV"
+    )
+    export_parser.add_argument("--db", default=str(DEFAULT_MART_PATH))
+    export_parser.add_argument("--out", default=str(DEFAULT_LATEST_TICKERS_CSV))
+
     args = parser.parse_args(argv)
     if args.command == "build":
         summary = build_mart(events_root=args.events_root, output_path=args.output)
         print(_format_build_summary(summary))
+        return 0
+    if args.command == "export-latest-tickers":
+        try:
+            result = export_latest_tickers(db_path=args.db, out_path=args.out)
+        except FileNotFoundError as error:
+            print(str(error))
+            return 1
+        print(_format_export_summary(result))
         return 0
     try:
         summary = summarize_mart(db_path=args.db)

@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import sqlite3
@@ -24,6 +25,28 @@ RUN_POPULATED = "local_20260706T090000_run-local_attempt-0_git-b7d7d008ada4"
 EMPTY_EVENT_TS = "2026-07-06T01:00:00Z"
 POPULATED_EVENT_TS = "2026-07-06T02:00:00Z"
 REPORT_TIMESTAMP = "2026-07-06T09:00:00"
+EXPORT_HEADER = [
+    "ticker",
+    "current_grade",
+    "simulated_grade",
+    "shadow_grade",
+    "shadow_score",
+    "shadow_passed",
+    "rs_percentile",
+    "trend_template_pass",
+    "pivot_status",
+    "stop_distance",
+    "volume_confirmation_ratio",
+    "contraction_count",
+    "base_depth",
+    "base_duration",
+    "shadow_reject_reasons",
+    "warning_flags",
+    "raw_row_index",
+    "observation_id",
+    "run_id",
+    "event_timestamp",
+]
 
 
 def _artifact(name, row_count):
@@ -357,6 +380,144 @@ def test_cli_build_and_summary_commands(tmp_path):
     missing = tmp_path / "missing.sqlite"
     assert mart.main(["summary", "--db", str(missing)]) == 1
     assert not missing.exists()
+
+
+def _read_csv(path):
+    with Path(path).open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        return reader.fieldnames, list(reader)
+
+
+def test_export_latest_tickers_creates_csv_with_expected_rows(tmp_path):
+    events_root, _ = _write_fixture_ledger(tmp_path)
+    db_path = tmp_path / "mart.sqlite"
+    mart.build_mart(events_root, db_path)
+    out_path = tmp_path / "latest.csv"
+
+    result = mart.export_latest_tickers(db_path, out_path)
+
+    header, rows = _read_csv(out_path)
+    assert header == EXPORT_HEADER
+    assert result == {
+        "out_path": out_path.as_posix(),
+        "run_id": RUN_POPULATED,
+        "row_count": 2,
+    }
+    assert [row["ticker"] for row in rows] == ["HST", "MRNA"]
+    hst, mrna = rows
+    assert hst["shadow_score"] == "82.0"
+    assert hst["shadow_passed"] == "1"
+    assert hst["trend_template_pass"] == "1"
+    assert hst["shadow_reject_reasons"] == ""
+    assert hst["base_duration"] == ""
+    assert mrna["shadow_passed"] == "0"
+    assert json.loads(mrna["shadow_reject_reasons"]) == [
+        "no identifiable final contraction pivot"
+    ]
+    assert mrna["run_id"] == RUN_POPULATED
+
+
+def test_export_latest_tickers_picks_newest_run_by_event_timestamp(tmp_path):
+    run_old = "local_20260706T070000_run-local_attempt-0_git-b7d7d008ada4"
+    events = [
+        _report_generated(
+            run_old, row_count=1, empty=False, event_timestamp="2026-07-06T00:30:00Z"
+        ),
+        _ticker_observed(
+            run_old, "ZZZ", shadow_score=99, row_index=0, shadow_passed=True, reject_reasons=None
+        ),
+    ] + _fixture_events()
+    append_events(events, ledger_root=tmp_path, report_timestamp=REPORT_TIMESTAMP)
+    db_path = tmp_path / "mart.sqlite"
+    mart.build_mart(tmp_path / "events", db_path)
+    out_path = tmp_path / "latest.csv"
+
+    result = mart.export_latest_tickers(db_path, out_path)
+
+    _, rows = _read_csv(out_path)
+    assert result["run_id"] == RUN_POPULATED
+    assert [row["ticker"] for row in rows] == ["HST", "MRNA"]
+    assert all(row["run_id"] == RUN_POPULATED for row in rows)
+
+
+def test_export_latest_tickers_empty_latest_run_writes_header_only(tmp_path):
+    run_late_empty = "local_20260706T110000_run-local_attempt-0_git-b7d7d008ada4"
+    events = _fixture_events() + [
+        _report_generated(
+            run_late_empty, row_count=0, empty=True, event_timestamp="2026-07-06T04:00:00Z"
+        ),
+    ]
+    append_events(events, ledger_root=tmp_path, report_timestamp=REPORT_TIMESTAMP)
+    db_path = tmp_path / "mart.sqlite"
+    mart.build_mart(tmp_path / "events", db_path)
+    out_path = tmp_path / "latest.csv"
+
+    result = mart.export_latest_tickers(db_path, out_path)
+
+    header, rows = _read_csv(out_path)
+    assert header == EXPORT_HEADER
+    assert rows == []
+    assert result["row_count"] == 0
+    assert result["run_id"] == run_late_empty
+
+
+def test_export_latest_tickers_missing_db_fails_cli(tmp_path):
+    missing = tmp_path / "missing.sqlite"
+    out_path = tmp_path / "latest.csv"
+
+    rc = mart.main(["export-latest-tickers", "--db", str(missing), "--out", str(out_path)])
+
+    assert rc == 1
+    assert not out_path.exists()
+    assert not missing.exists()
+
+
+def test_export_latest_tickers_creates_parent_directory(tmp_path):
+    events_root, _ = _write_fixture_ledger(tmp_path)
+    db_path = tmp_path / "mart.sqlite"
+    mart.build_mart(events_root, db_path)
+    out_path = tmp_path / "nested" / "deep" / "latest.csv"
+
+    mart.export_latest_tickers(db_path, out_path)
+
+    assert out_path.exists()
+
+
+def test_export_is_deterministic_and_overwrites(tmp_path):
+    events_root, _ = _write_fixture_ledger(tmp_path)
+    db_path = tmp_path / "mart.sqlite"
+    mart.build_mart(events_root, db_path)
+    out_path = tmp_path / "latest.csv"
+    out_path.write_text("junk", encoding="utf-8")
+    db_before = db_path.read_bytes()
+
+    mart.export_latest_tickers(db_path, out_path)
+    first = out_path.read_bytes()
+    mart.export_latest_tickers(db_path, out_path)
+    second = out_path.read_bytes()
+
+    assert b"junk" not in first
+    assert first == second
+    assert db_path.read_bytes() == db_before
+
+
+def test_export_csv_path_is_gitignored():
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root.as_posix()}",
+            "check-ignore",
+            "reports/research_mart/latest_ticker_observations.csv",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
 
 
 def test_mart_output_path_is_gitignored():

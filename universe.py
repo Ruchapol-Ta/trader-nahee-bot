@@ -27,6 +27,9 @@ _WIKI_HEADERS = {
         "Chrome/124.0 Safari/537.36"
     )
 }
+_NASDAQ_100_WIKIPEDIA_URL = (
+    "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
+)
 
 
 def dedupe_tickers(*ticker_lists: list[str]) -> list[str]:
@@ -72,7 +75,7 @@ def get_sp500_tickers() -> list[str]:
 def get_nasdaq100_tickers() -> list[str]:
     """Fetch Nasdaq 100 tickers from Wikipedia. Raises UniverseLoadError on bad data."""
     try:
-        tables = _fetch_wiki_tables("https://en.wikipedia.org/wiki/Nasdaq-100")
+        tables = _fetch_wiki_tables(_NASDAQ_100_WIKIPEDIA_URL)
     except Exception as e:
         raise UniverseLoadError(f"Nasdaq 100 fetch failed: {type(e).__name__}: {e}") from e
 

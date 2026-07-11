@@ -87,6 +87,12 @@ jobs:
           python -m research.mart build --events-root reports/research_ledger/events --output reports/research_mart/research_mart.sqlite
           python -m research.mart summary --db reports/research_mart/research_mart.sqlite
 
+      - name: Export latest ticker observations CSV
+        run: |
+          python -m research.mart export-latest-tickers \
+            --db reports/research_mart/research_mart.sqlite \
+            --out reports/research_mart/latest_ticker_observations.csv
+
       - name: Upload review reports
         if: always()
         uses: actions/upload-artifact@v4.6.2
@@ -104,6 +110,6 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: research-mart-${{ github.run_id }}
-          path: reports/research_mart/research_mart.sqlite
+          path: reports/research_mart/
           if-no-files-found: error
           retention-days: 30
